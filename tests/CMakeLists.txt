@@ -1,12 +1,14 @@
 SET(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
 
-file(GLOB_RECURSE libsrc *.h *.cpp *.hpp *.c *.cc *.cs)
+# A single unified suite runs on both backends.
+set(libsrc main.cpp dotnetpp_suite.cpp dotnetpp_suite.h)
+set(backend_libs dotnetpp)
 
 set(target_name monopp_test)
 
 add_executable (${target_name} ${libsrc})
 
-target_link_libraries(${target_name} PUBLIC monort suitepp)
+target_link_libraries(${target_name} PUBLIC ${backend_libs} suitepp)
 
 set_target_properties(${target_name} PROPERTIES
     CXX_STANDARD 14

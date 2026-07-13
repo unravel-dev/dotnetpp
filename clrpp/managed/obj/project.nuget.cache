@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "dgSpecHash": "XdTH/JvJiCM=",
+  "success": true,
+  "projectFilePath": "C:\\Workspace\\github\\UnravelEngine\\UnravelEngine\\deps\\monopp\\monopp\\clrpp\\managed\\Clrpp.Managed.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.bcl.asyncinterfaces\\1.1.0\\microsoft.bcl.asyncinterfaces.1.1.0.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.diagnostics.netcore.client\\0.2.410101\\microsoft.diagnostics.netcore.client.0.2.410101.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.diagnostics.runtime\\3.1.512801\\microsoft.diagnostics.runtime.3.1.512801.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.configuration\\2.1.1\\microsoft.extensions.configuration.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.configuration.abstractions\\2.1.1\\microsoft.extensions.configuration.abstractions.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.configuration.binder\\2.1.1\\microsoft.extensions.configuration.binder.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.dependencyinjection.abstractions\\2.1.1\\microsoft.extensions.dependencyinjection.abstractions.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.logging\\2.1.1\\microsoft.extensions.logging.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.logging.abstractions\\2.1.1\\microsoft.extensions.logging.abstractions.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.options\\2.1.1\\microsoft.extensions.options.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.extensions.primitives\\2.1.1\\microsoft.extensions.primitives.2.1.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\mono.cecil\\0.11.6\\mono.cecil.0.11.6.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\system.memory\\4.5.1\\system.memory.4.5.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\system.runtime.compilerservices.unsafe\\4.5.1\\system.runtime.compilerservices.unsafe.4.5.1.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.netcore.app.ref\\8.0.22\\microsoft.netcore.app.ref.8.0.22.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.windowsdesktop.app.ref\\8.0.22\\microsoft.windowsdesktop.app.ref.8.0.22.nupkg.sha512",
+    "C:\\Users\\User\\AppData\\Local\\Temp\\cursor-sandbox-cache\\475bc43ed4a9f21d2bf534922574e6ed\\nuget\\microsoft.aspnetcore.app.ref\\8.0.22\\microsoft.aspnetcore.app.ref.8.0.22.nupkg.sha512"
+  ],
+  "logs": []
+}

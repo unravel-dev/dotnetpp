@@ -255,7 +255,7 @@ auto set_field_value(const mono_object& obj, const std::string& name, const T& v
 		invoker.set_value(obj, val);
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}
@@ -271,7 +271,7 @@ auto set_field_value(const mono_type& type, const std::string& name, const T& va
 		invoker.set_value(val);
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}
@@ -286,7 +286,7 @@ auto get_field_value(const mono_object& obj, const std::string& name, T& val) ->
 		val = invoker.get_value(obj);
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}
@@ -301,7 +301,7 @@ auto get_field_value(const mono_type& type, const std::string& name, T& val) -> 
 		val = invoker.get_value();
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}

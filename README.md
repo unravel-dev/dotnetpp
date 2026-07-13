@@ -9,10 +9,10 @@
 ### Not feature complete but useable.
 
 ---
-Consists of 3 small projects.
-- monopp - C++14 wrapper for mono runtime.
-
-- monort - utility providing ease of binding custom pod/non-pod types for interop.
+Consists of several small projects.
+- monopp - C++14 wrapper for mono runtime, including a header-only POD converter layer (mono_managed.h) for binding custom pod types.
+- clrpp - C++14 wrapper for the CoreCLR runtime (hostfxr + managed bridge), mirroring the monopp API.
+- dotnetpp - unified dotnet:: API selecting monopp or clrpp at compile time (see dotnetpp/README.md).
 - tests - tests and examples using the library.
 
 ---

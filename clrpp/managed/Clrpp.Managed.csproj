@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RollForward>LatestMajor</RollForward>
+    <AssemblyName>Clrpp.Managed</AssemblyName>
+    <RootNamespace>Clrpp</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <DebugType>portable</DebugType>
+    <!-- NuGet dependencies (Mono.Cecil) must land next to the bridge dll. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Optional icall IL weaving (see Weaver.cs). Standalone IL library,
+         no dependency on the mono runtime. -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+    <!-- Optional leak diagnostics (see Bridge.LeakAnalysis.cs). ClrMD lets us
+         snapshot our own process and walk the real GC handle table / heap /
+         root paths - only exercised when a domain failed to unload. -->
+    <PackageReference Include="Microsoft.Diagnostics.Runtime" Version="3.1.512801" />
+  </ItemGroup>
+
+</Project>

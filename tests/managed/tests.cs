@@ -1,4 +1,12 @@
+/*
+ * Unified managed fixture for the dotnetpp test suite. The same file is
+ * compiled and used on both backends:
+ *   - mono resolves [MethodImpl(InternalCall)] extern methods natively.
+ *   - coreclr rewrites them at load time through the IL weaver (see
+ *     clrpp/managed/Weaver.cs), so no Clrpp.* references are needed here.
+ */
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace Tests
@@ -13,13 +21,19 @@ class TestClassNested1
 		public int someField = 12;
 	}
 	public int someField = 12;
-}	
-}	
+}
+}
+
+public enum TestEnum
+{
+	First = 1,
+	Second = 5,
+	Third = 42
+}
 
 class MyObject
 {
-public
-	MyObject()
+	public MyObject()
 	{
 		CreateInternal(5.0f, "test");
 	}
@@ -29,10 +43,10 @@ public
 		DestroyInternal();
 	}
 
-	[MethodImpl(MethodImplOptions.InternalCall)] 
+	[MethodImpl(MethodImplOptions.InternalCall)]
 	private extern void CreateInternal(float x, string s);
 
-	[MethodImpl(MethodImplOptions.InternalCall)] 
+	[MethodImpl(MethodImplOptions.InternalCall)]
 	private extern void DestroyInternal();
 
 	[MethodImpl(MethodImplOptions.InternalCall)]
@@ -44,10 +58,10 @@ public
 
 class MonoppTest
 {
+	public int someField = 12;
+	public string someFieldStr = "InitialString";
 
-    public int someField = 12;
-
-    public int someProperty
+	public int someProperty
 	{
 		get
 		{
@@ -55,14 +69,26 @@ class MonoppTest
 		}
 		set
 		{
-            Console.WriteLine("FROM C# : Setting property value to {0}", value);
 			someField = value;
 		}
 	}
 
-    public static int someFieldStatic = 12;
+	public string somePropertyStr
+	{
+		get
+		{
+			return someFieldStr;
+		}
+		set
+		{
+			someFieldStr = value;
+		}
+	}
 
-    public static int somePropertyStatic
+	public static int someFieldStatic = 12;
+	public static string someFieldStrStatic = "InitialStatic";
+
+	public static int somePropertyStatic
 	{
 		get
 		{
@@ -70,117 +96,164 @@ class MonoppTest
 		}
 		set
 		{
-			//Console.WriteLine("FROM C# : Setting static property value to {0}", value);
 			someFieldStatic = value;
 		}
 	}
-	
-    static MonoppTest()
+
+	void Method1()
 	{
-		//Console.WriteLine("FROM C# : STATIC CONSTRUCTOR.");
-	}
-    public MonoppTest()
-	{
-		//Console.WriteLine("FROM C# : MonoppTest created.");
-	}
-    ~MonoppTest()
-	{
-		//Console.WriteLine("FROM C# : MonoppTest destroyed.");
 	}
 
-    void Method1()
-	{
-        //Console.WriteLine("FROM C# : Hello Mono World from instance.");
-	}
-	
 	void Method2(string s)
 	{
-		//Console.WriteLine("FROM C# : WithParam string: " + s);
 	}
+
 	void Method3(int s)
 	{
-		//Console.WriteLine("FROM C# : WithParam int: " + s);
 	}
+
 	void Method4(int s, int s1)
 	{
-		//Console.WriteLine("FROM C# : WithParam int, int: {0}, {1}", s, s1);
 	}
-	
-    public string Method5(string s, int b)
+
+	public string Method5(string s, int b)
 	{
-		//Console.WriteLine("FROM C# : WithParam: {0}, {1}", s, b);
 		return "Return Value: " + s;
 	}
 
-    public static int Function1(int a)
+	public static int Function1(int a)
 	{
-		//Console.WriteLine("FROM C# : Int value: " + a);
 		return a + 1337;
 	}
 
-    public static void Function2(float a, int b, float c)
+	public static void Function2(float a, int b, float c)
 	{
-		//Console.WriteLine("FROM C# : VoidMethod: {0}, {1}, {2}", a, b, c);
 	}
 
-    public static void Function3(string a)
+	public static void Function3(string a)
 	{
-		//Console.WriteLine("FROM C# : String value: {0}", a);
 	}
 
-    public static string Function4(string str)
+	public static string Function4(string str)
 	{
 		return "The string value was: " + str;
 	}
-	
-    public static void Function5()
+
+	public static void Function5()
 	{
 		throw new Exception("Hello!");
 	}
-	
-    public static void Function6()
+
+	public static void Function6()
 	{
 		Tests.MyObject obj = new Tests.MyObject();
 		obj.DoStuff("blalba");
 		string str = obj.ReturnAString("fafafa");
-        str += "";
-		//Console.WriteLine("FROM C# : ReturnAString : {0}", str);
+		str += "";
+	}
+
+	// Primitive marshalling matrix used by the native suite.
+	public static bool EchoBool(bool v)
+	{
+		return !v;
+	}
+
+	public static long EchoLong(long v)
+	{
+		return v + 1;
+	}
+
+	public static double EchoDouble(double v)
+	{
+		return v * 2.0;
+	}
+
+	public static float EchoFloat(float v)
+	{
+		return v + 0.5f;
+	}
+
+	public static double Sum(int a, float b, double c, long d)
+	{
+		return a + b + c + d;
+	}
+
+	// Array / list marshalling.
+	public static int SumArray(int[] values)
+	{
+		int sum = 0;
+		foreach (int v in values)
+		{
+			sum += v;
+		}
+		return sum;
+	}
+
+	public static List<int> MakeList()
+	{
+		return new List<int> { 1, 2, 3 };
+	}
+
+	public static int SumList(List<int> values)
+	{
+		int sum = 0;
+		foreach (int v in values)
+		{
+			sum += v;
+		}
+		return sum;
+	}
+
+	// Native exceptions propagating into managed code.
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern void ThrowNative();
+
+	public static bool CatchNativeException()
+	{
+		try
+		{
+			ThrowNative();
+			return false;
+		}
+		catch (InvalidOperationException e)
+		{
+			return e.Message == "native says no";
+		}
+	}
+
+	// Static internal call verified from the managed side.
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern int NativeAdd(int a, int b);
+
+	public static bool CheckNativeAdd()
+	{
+		return NativeAdd(2, 3) == 5;
 	}
 }
 
-
-public struct Vector2f  
+class DerivedTest : MonoppTest
 {
-    public Vector2f(float _x, float _y)
+}
+
+public struct Vector2f
+{
+	public Vector2f(float _x, float _y)
 	{
 		x = _x;
 		y = _y;
 	}
-    public float x;
-    public float y;
-}
-
-public class WrapperVector2f : Monopp.Core.NativeObject
-{
-	[MethodImpl(MethodImplOptions.InternalCall)] 
-	public extern WrapperVector2f(float x, float y);
-
-	[MethodImpl(MethodImplOptions.InternalCall)] 
-	public extern WrapperVector2f(WrapperVector2f rhs);
-
-    public void Foo()
-	{
-	}
+	public float x;
+	public float y;
 }
 
 class MonortTest
 {
-    [MethodImpl(MethodImplOptions.InternalCall)] 
+	[MethodImpl(MethodImplOptions.InternalCall)]
 	public extern void TestInternalPODCall(Vector2f rhs);
-    
-    public Vector2f someFieldPOD = new Vector2f(12, 13);
 
-    public Vector2f somePropertyPOD
+	public Vector2f someFieldPOD = new Vector2f(12, 13);
+
+	public Vector2f somePropertyPOD
 	{
 		get
 		{
@@ -188,14 +261,13 @@ class MonortTest
 		}
 		set
 		{
-			//Console.WriteLine("FROM C# : Setting POD property value to {0}, {1}", value.x, value.y);
 			someFieldPOD = value;
 		}
 	}
 
-    public static Vector2f someFieldPODStatic = new Vector2f(12, 13);
+	public static Vector2f someFieldPODStatic = new Vector2f(12, 13);
 
-    public static Vector2f somePropertyPODStatic
+	public static Vector2f somePropertyPODStatic
 	{
 		get
 		{
@@ -203,66 +275,17 @@ class MonortTest
 		}
 		set
 		{
-			//Console.WriteLine("FROM C# : Setting static POD property value to {0}, {1}", value.x, value.y);
 			someFieldPODStatic = value;
 		}
 	}
 
-    public WrapperVector2f someFieldNONPOD = new WrapperVector2f(12, 13);
-
-    public WrapperVector2f somePropertyNONPOD
-	{
-		get
-		{
-			return someFieldNONPOD;
-		}
-		set
-		{
-			//Console.WriteLine("FROM C# : Setting NON POD property value");
-			someFieldNONPOD = value;
-		}
-	}
-
-public
-	static WrapperVector2f someFieldNONPODStatic = new WrapperVector2f(12, 13);
-
-public
-	static WrapperVector2f somePropertyNONPODStatic
-	{
-		get
-		{
-			return someFieldNONPODStatic;
-		}
-		set
-        {
-			//Console.WriteLine("FROM C# : Setting static NON POD property value");
-			someFieldNONPODStatic = value;
-		}
-	}
-	
 	public Vector2f MethodPodAR(Vector2f bb)
 	{
-		//Console.WriteLine(bb.x);
-		//Console.WriteLine(bb.y);
 		var s = new Vector2f();
 		s.x = 165.0f;
 		s.y = 7.0f;
-
-		return s;
-	}
-
-	public WrapperVector2f MethodPodARW(WrapperVector2f bb)
-	{
-		//Console.WriteLine("FROM C# :");
-		var s = new WrapperVector2f(55.0f, 66.0f);
-		var s1 = new WrapperVector2f(s);
-
-		s.Foo();
-		s1.Foo();
-        TestInternalPODCall(new Vector2f(5, 12));
 		return s;
 	}
 }
 
 } // namespace Tests
-

@@ -440,10 +440,8 @@ struct mono_converter<mono_list<T>>
 
 	static auto from_mono(const managed_type& obj) -> native_type
 	{
-		if(!obj)
-		{
-			return {};
-		}
+		// mono_list has no default constructor; a null handle yields an
+		// invalid (but constructible) wrapper.
 		return mono_list<T>(mono_object(obj));
 	}
 };

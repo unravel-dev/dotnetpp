@@ -1,21 +1,18 @@
-#include "example_suite.h"
-#include "monopp_suite.h"
-#include "monort_suite.h"
+#include "dotnetpp_suite.h"
 
-#include <monopp/mono_jit.h>
+#include <dotnetpp/dotnet_jit.h>
 
 int main()
 {
-	if(!mono::init())
+	dotnet::compiler_paths paths;
+	if(!dotnet::init(paths))
 	{
 		return 1;
 	}
 
-	monopp::test_suite();
-	monort::test_suite();
-	//example::test_suite();
+	dotnetpp::test_suite();
 
-	mono::shutdown();
+	dotnet::shutdown();
 
 	return 0;
 }

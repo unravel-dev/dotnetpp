@@ -13,8 +13,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mo
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake/utility")
 
 option(BUILD_MONOPP_SHARED "Build as a shared library." ON)
-option(BUILD_MONOPP_MONORT "Build the monort utility library" ON)
-option(BUILD_MONOPP_MONORT_MANAGED "Build the monort managed utility library" ON)
+option(BUILD_MONOPP_CLRPP "Build the clrpp coreclr wrapper library" ON)
+option(BUILD_MONOPP_DOTNETPP "Build the dotnetpp unified wrapper library" ON)
 option(BUILD_MONOPP_TESTS "Build the tests" ${MONOPP_MAIN_PROJECT})
 
 option(BUILD_MONOPP_WITH_CODE_STYLE_CHECKS "Build with code style checks." OFF)
@@ -40,8 +40,7 @@ if(BUILD_MONOPP_TESTS)
 
     message(STATUS "Enabled ${PROJECT_NAME} tests.")
 
-	set(BUILD_MONOPP_MONORT ON)
-	set(BUILD_MONOPP_MONORT_MANAGED ON)
+	set(BUILD_MONOPP_DOTNETPP ON)
 endif()
 
 if(BUILD_MONOPP_SHARED)
@@ -54,8 +53,12 @@ endif()
 
 add_subdirectory(monopp)
 
-if(BUILD_MONOPP_MONORT)	
-	add_subdirectory(monort)
+if(BUILD_MONOPP_CLRPP)
+	add_subdirectory(clrpp)
+endif()
+
+if(BUILD_MONOPP_DOTNETPP)
+	add_subdirectory(dotnetpp)
 endif()
 
 if(BUILD_MONOPP_TESTS)
