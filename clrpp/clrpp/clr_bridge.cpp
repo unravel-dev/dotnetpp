@@ -270,8 +270,30 @@ auto managed_ptr::share(clr_handle raw) -> managed_ptr
 namespace bridge_detail
 {
 
+namespace
+{
+// A dotnet root is only usable when it actually contains a versioned
+// host/fxr directory with the hostfxr library. Merely checking that the
+// root directory exists is not enough: e.g. on Ubuntu the Microsoft feed
+// installs to /usr/share/dotnet while the distro packages use
+// /usr/lib/dotnet, and an empty leftover directory at either location
+// must not shadow the real installation.
+auto has_hostfxr(const std::string& root) -> bool
+{
+	auto fxr_base = path_utils::path_join(path_utils::path_join(root, "host"), "fxr");
+	auto fxr_dir = path_utils::pick_highest_version_dir(fxr_base);
+	if(fxr_dir.empty())
+	{
+		return false;
+	}
+	return path_utils::path_exists(path_utils::path_join(fxr_dir, hostfxr_library_name()));
+}
+} // namespace
+
 auto locate_dotnet_root(const std::string& override_root) -> std::string
 {
+	// Explicit override and DOTNET_ROOT express user intent - honor them
+	// as-is and let initialization surface a clear error if they are wrong.
 	if(!override_root.empty())
 	{
 		return override_root;
@@ -283,17 +305,46 @@ auto locate_dotnet_root(const std::string& override_root) -> std::string
 		return env_root;
 	}
 
+	std::vector<std::string> candidates;
 #ifdef _WIN32
-	return "C:/Program Files/dotnet";
-#elif defined(__APPLE__)
-	return "/usr/local/share/dotnet";
-#else
-	if(path_utils::path_exists("/usr/share/dotnet"))
+	auto program_files = path_utils::get_env("ProgramFiles");
+	if(!program_files.empty())
 	{
-		return "/usr/share/dotnet";
+		candidates.push_back(path_utils::path_join(program_files, "dotnet"));
 	}
-	return "/usr/lib/dotnet";
+	candidates.push_back("C:/Program Files/dotnet");
+#elif defined(__APPLE__)
+	candidates.push_back("/usr/local/share/dotnet");
+	candidates.push_back("/opt/homebrew/opt/dotnet/libexec"); // brew (arm64)
+	candidates.push_back("/usr/local/opt/dotnet/libexec");    // brew (x64)
+#else
+	candidates.push_back("/usr/share/dotnet"); // Microsoft package feed
+	candidates.push_back("/usr/lib/dotnet");   // Debian/Ubuntu distro packages
+	candidates.push_back("/usr/lib64/dotnet"); // Fedora/RHEL distro packages
 #endif
+	auto home = path_utils::get_env(
+#ifdef _WIN32
+		"USERPROFILE"
+#else
+		"HOME"
+#endif
+	);
+	if(!home.empty())
+	{
+		candidates.push_back(path_utils::path_join(home, ".dotnet")); // dotnet-install scripts
+	}
+
+	for(const auto& candidate : candidates)
+	{
+		if(has_hostfxr(candidate))
+		{
+			return candidate;
+		}
+	}
+
+	// Nothing validated - return the first platform default so the caller's
+	// error message points at a sensible location.
+	return candidates.front();
 }
 
 auto initialize(const std::string& assembly_dir,
