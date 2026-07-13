@@ -1,7 +1,9 @@
 #include "clr_type.h"
+#include "clr_bridge_utils.h"
 #include "clr_domain.h"
 #include "clr_exception.h"
 #include "clr_field.h"
+#include "clr_member_utils.h"
 #include "clr_method.h"
 #include "clr_object.h"
 #include "clr_property.h"
@@ -50,22 +52,14 @@ clr_type::clr_type(clr_handle type_handle)
 
 void clr_type::generate_meta()
 {
-	auto& cache = get_type_cache();
-	auto it = cache.find(type_);
-	if(it != cache.end())
-	{
-		meta_ = it->second;
-		return;
-	}
-
-	auto meta = std::make_shared<meta_info>();
-	meta->name_space = take_string(bridge().type_get_namespace(type_));
-	meta->name = take_string(bridge().type_get_name(type_));
-	meta->fullname = take_string(bridge().type_get_fullname(type_));
-	meta->flags = bridge().type_get_flags(type_);
-
-	cache[type_] = meta;
-	meta_ = meta;
+	meta_ = get_or_create_meta<meta_info>(get_type_cache(), type_,
+										  [this](meta_info& meta)
+										  {
+											  meta.name_space = take_string(bridge().type_get_namespace(type_));
+											  meta.name = take_string(bridge().type_get_name(type_));
+											  meta.fullname = take_string(bridge().type_get_fullname(type_));
+											  meta.flags = bridge().type_get_flags(type_);
+										  });
 }
 
 auto clr_type::valid() const -> bool
@@ -109,94 +103,57 @@ auto clr_type::get_property(const std::string& name) const -> clr_property
 
 auto clr_type::get_fields(bool include_base) const -> std::vector<clr_field>
 {
-	std::vector<clr_field> result;
 	if(!valid())
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().type_get_fields(type_, include_base ? 1 : 0, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().type_get_fields(type_, include_base ? 1 : 0, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_field(handle));
-	}
-	return result;
+	const int32_t include = include_base ? 1 : 0;
+	return fetch_and_map<clr_field>(
+		[this, include](clr_handle* buffer, int32_t count)
+		{ return bridge().type_get_fields(type_, include, buffer, count); },
+		[](clr_handle handle) { return clr_field(handle); });
 }
 
 auto clr_type::get_properties(bool include_base) const -> std::vector<clr_property>
 {
-	std::vector<clr_property> result;
 	if(!valid())
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().type_get_properties(type_, include_base ? 1 : 0, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().type_get_properties(type_, include_base ? 1 : 0, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_property(handle));
-	}
-	return result;
+	const int32_t include = include_base ? 1 : 0;
+	return fetch_and_map<clr_property>(
+		[this, include](clr_handle* buffer, int32_t count)
+		{ return bridge().type_get_properties(type_, include, buffer, count); },
+		[](clr_handle handle) { return clr_property(handle); });
 }
 
 auto clr_type::get_methods(bool include_base) const -> std::vector<clr_method>
 {
-	std::vector<clr_method> result;
 	if(!valid())
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().type_get_methods(type_, include_base ? 1 : 0, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().type_get_methods(type_, include_base ? 1 : 0, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_method(handle));
-	}
-	return result;
+	const int32_t include = include_base ? 1 : 0;
+	return fetch_and_map<clr_method>(
+		[this, include](clr_handle* buffer, int32_t count)
+		{ return bridge().type_get_methods(type_, include, buffer, count); },
+		[](clr_handle handle) { return clr_method(handle); });
 }
 
 auto clr_type::get_attributes(bool include_base) const -> std::vector<clr_object>
 {
-	std::vector<clr_object> result;
 	if(!valid())
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().type_get_attributes(type_, include_base ? 1 : 0, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().type_get_attributes(type_, include_base ? 1 : 0, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_object(managed_ptr::adopt(handle)));
-	}
-	return result;
+	const int32_t include = include_base ? 1 : 0;
+	return fetch_managed_objects(
+		[this, include](clr_handle* buffer, int32_t count)
+		{ return bridge().type_get_attributes(type_, include, buffer, count); });
 }
 
 auto clr_type::has_base_type() const -> bool
@@ -216,25 +173,15 @@ auto clr_type::get_base_type() const -> clr_type
 
 auto clr_type::get_nested_types() const -> std::vector<clr_type>
 {
-	std::vector<clr_type> result;
 	if(!valid())
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().type_get_nested_types(type_, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().type_get_nested_types(type_, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_type(handle));
-	}
-	return result;
+	return fetch_and_map<clr_type>(
+		[this](clr_handle* buffer, int32_t count)
+		{ return bridge().type_get_nested_types(type_, buffer, count); },
+		[](clr_handle handle) { return clr_type(handle); });
 }
 
 auto clr_type::get_nesting_type() const -> clr_type

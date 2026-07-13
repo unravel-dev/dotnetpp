@@ -2,9 +2,9 @@
 #include "clr_exception.h"
 #include "clr_internal_call.h"
 #include "clr_logger.h"
+#include "clr_path_utils.h"
 
 #include <algorithm>
-#include <cstdlib>
 #include <fstream>
 
 #ifdef _WIN32
@@ -16,10 +16,7 @@
 #endif
 #include <windows.h>
 #else
-#include <dirent.h>
 #include <dlfcn.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #endif
 
 namespace clr
@@ -42,7 +39,8 @@ using char_t = char;
 
 namespace
 {
-
+namespace ANONYMOUS
+{
 using hostfxr_handle = void*;
 
 struct hostfxr_initialize_parameters
@@ -78,7 +76,7 @@ using load_assembly_and_get_function_pointer_fn = int32_t(CORECLR_DELEGATE_CALLT
 																					  void* reserved, void** delegate);
 
 const char_t* const UNMANAGEDCALLERSONLY_METHOD = reinterpret_cast<const char_t*>(-1);
-
+} // namespace ANONYMOUS
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -89,11 +87,12 @@ struct bridge_state
 	bridge_detail::exports table{};
 
 	void* hostfxr_lib = nullptr;
-	hostfxr_close_fn close_fn = nullptr;
-	hostfxr_handle context = nullptr;
+	ANONYMOUS::hostfxr_close_fn close_fn = nullptr;
+	ANONYMOUS::hostfxr_handle context = nullptr;
 
 	std::string managed_assembly_path;
 	std::string dotnet_root;
+	std::string dotnet_version = default_dotnet_version();
 };
 
 auto state() -> bridge_state&
@@ -159,166 +158,6 @@ auto get_symbol(void* lib, const char* name) -> void*
 // #endif
 // }
 
-// -- C++14 friendly path helpers (no std::filesystem) -----------------------
-
-auto path_join(const std::string& a, const std::string& b) -> std::string
-{
-	if(a.empty())
-	{
-		return b;
-	}
-	const char last = a.back();
-	if(last == '/' || last == '\\')
-	{
-		return a + b;
-	}
-	return a + "/" + b;
-}
-
-auto path_exists(const std::string& path) -> bool
-{
-#ifdef _WIN32
-	return ::GetFileAttributesW(to_char_t(path).c_str()) != INVALID_FILE_ATTRIBUTES;
-#else
-	struct stat st
-	{
-	};
-	return ::stat(path.c_str(), &st) == 0;
-#endif
-}
-
-auto current_executable_path() -> std::string
-{
-#ifdef _WIN32
-	char buffer[MAX_PATH]{};
-	DWORD len = ::GetModuleFileNameA(nullptr, buffer, sizeof(buffer));
-	return len > 0 ? std::string(buffer, len) : std::string{};
-#elif defined(__APPLE__)
-	return {};
-#else
-	char buffer[4096]{};
-	ssize_t len = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
-	return len > 0 ? std::string(buffer, static_cast<size_t>(len)) : std::string{};
-#endif
-}
-
-auto current_directory() -> std::string
-{
-#ifdef _WIN32
-	char buffer[MAX_PATH]{};
-	DWORD len = ::GetCurrentDirectoryA(sizeof(buffer), buffer);
-	return len > 0 ? std::string(buffer, len) : std::string(".");
-#else
-	char buffer[4096]{};
-	return ::getcwd(buffer, sizeof(buffer)) ? std::string(buffer) : std::string(".");
-#endif
-}
-
-auto list_subdirectories(const std::string& dir) -> std::vector<std::string>
-{
-	std::vector<std::string> result;
-#ifdef _WIN32
-	WIN32_FIND_DATAA find_data;
-	auto handle = ::FindFirstFileA((dir + "\\*").c_str(), &find_data);
-	if(handle == INVALID_HANDLE_VALUE)
-	{
-		return result;
-	}
-	do
-	{
-		if((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 && find_data.cFileName[0] != '.')
-		{
-			result.emplace_back(find_data.cFileName);
-		}
-	} while(::FindNextFileA(handle, &find_data));
-	::FindClose(handle);
-#else
-	if(auto* d = ::opendir(dir.c_str()))
-	{
-		while(auto* entry = ::readdir(d))
-		{
-			if(entry->d_name[0] == '.')
-			{
-				continue;
-			}
-			struct stat st
-			{
-			};
-			if(::stat(path_join(dir, entry->d_name).c_str(), &st) == 0 && S_ISDIR(st.st_mode))
-			{
-				result.emplace_back(entry->d_name);
-			}
-		}
-		::closedir(d);
-	}
-#endif
-	return result;
-}
-
-auto parse_version(const std::string& text) -> std::vector<int>
-{
-	std::vector<int> parts;
-	std::string current;
-	for(char c : text)
-	{
-		if(c == '.')
-		{
-			parts.push_back(current.empty() ? 0 : std::atoi(current.c_str()));
-			current.clear();
-		}
-		else if(c >= '0' && c <= '9')
-		{
-			current += c;
-		}
-		else
-		{
-			// stop at previews/rc suffixes
-			break;
-		}
-	}
-	if(!current.empty())
-	{
-		parts.push_back(std::atoi(current.c_str()));
-	}
-	return parts;
-}
-
-auto pick_highest_version_dir(const std::string& base) -> std::string
-{
-	std::string best;
-	std::vector<int> best_version;
-
-	for(const auto& name : list_subdirectories(base))
-	{
-		auto version = parse_version(name);
-		if(version.empty())
-		{
-			continue;
-		}
-
-		if(best.empty() || std::lexicographical_compare(best_version.begin(), best_version.end(),
-														version.begin(), version.end()))
-		{
-			best = path_join(base, name);
-			best_version = version;
-		}
-	}
-
-	return best;
-}
-
-auto get_env(const char* name) -> std::string
-{
-#ifdef _WIN32
-	char buffer[4096]{};
-	DWORD len = GetEnvironmentVariableA(name, buffer, sizeof(buffer));
-	return len > 0 && len < sizeof(buffer) ? std::string(buffer, len) : std::string{};
-#else
-	const char* value = std::getenv(name);
-	return value ? value : std::string{};
-#endif
-}
-
 auto hostfxr_library_name() -> std::string
 {
 #ifdef _WIN32
@@ -347,19 +186,19 @@ auto CLRPP_CALLTYPE native_pending_exception_query() -> const char*
 	return consume_pending_exception();
 }
 
-void write_default_runtimeconfig(const std::string& path)
+void write_default_runtimeconfig(const std::string& path, const std::string& version)
 {
 	std::ofstream file(path.c_str());
-	file << R"({
-  "runtimeOptions": {
-    "tfm": "net8.0",
-    "rollForward": "LatestMajor",
-    "framework": {
-      "name": "Microsoft.NETCore.App",
-      "version": "8.0.0"
-    }
-  }
-})";
+	file << "{\n"
+		 << "  \"runtimeOptions\": {\n"
+		 << "    \"tfm\": \"net" << version << "\",\n"
+		 << "    \"rollForward\": \"LatestMajor\",\n"
+		 << "    \"framework\": {\n"
+		 << "      \"name\": \"Microsoft.NETCore.App\",\n"
+		 << "      \"version\": \"" << version << ".0\"\n"
+		 << "    }\n"
+		 << "  }\n"
+		 << "}\n";
 }
 
 } // namespace
@@ -438,7 +277,7 @@ auto locate_dotnet_root(const std::string& override_root) -> std::string
 		return override_root;
 	}
 
-	auto env_root = get_env("DOTNET_ROOT");
+	auto env_root = path_utils::get_env("DOTNET_ROOT");
 	if(!env_root.empty())
 	{
 		return env_root;
@@ -449,7 +288,7 @@ auto locate_dotnet_root(const std::string& override_root) -> std::string
 #elif defined(__APPLE__)
 	return "/usr/local/share/dotnet";
 #else
-	if(path_exists("/usr/share/dotnet"))
+	if(path_utils::path_exists("/usr/share/dotnet"))
 	{
 		return "/usr/share/dotnet";
 	}
@@ -457,7 +296,10 @@ auto locate_dotnet_root(const std::string& override_root) -> std::string
 #endif
 }
 
-auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_override) -> bool
+auto initialize(const std::string& assembly_dir,
+				const std::string& dotnet_root_override,
+				const std::string& managed_dir,
+				const std::string& dotnet_version) -> bool
 {
 	auto& s = state();
 	if(s.alive)
@@ -465,40 +307,46 @@ auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_
 		return true;
 	}
 
+	if(!dotnet_version.empty())
+	{
+		s.dotnet_version = dotnet_version;
+	}
+
 	// -- locate the managed bridge -----------------------------------------
 	// The bridge and its dependencies (Mono.Cecil, Microsoft.Diagnostics.*)
 	// live together in one directory; the bridge resolves its dependencies
 	// from its own location. Probe, in order: the explicit assembly_dir, a
-	// clrpp/ subfolder next to the executable, the executable directory
+	// managed_dir subfolder next to the executable, the executable directory
 	// itself, then the same two relative to the working directory.
 	std::vector<std::string> candidate_dirs;
+	const std::string runtime_dir = managed_dir.empty() ? managed_runtime_dir() : managed_dir;
 	if(!assembly_dir.empty())
 	{
 		candidate_dirs.push_back(assembly_dir);
-		candidate_dirs.push_back(path_join(assembly_dir, "clrpp"));
+		candidate_dirs.push_back(path_utils::path_join(assembly_dir, runtime_dir));
 	}
-	auto exe_path = current_executable_path();
+	auto exe_path = path_utils::current_executable_path();
 	if(!exe_path.empty())
 	{
 		auto slash = exe_path.find_last_of("/\\");
 		if(slash != std::string::npos)
 		{
 			auto exe_dir = exe_path.substr(0, slash);
-			candidate_dirs.push_back(path_join(exe_dir, "clrpp"));
+			candidate_dirs.push_back(path_utils::path_join(exe_dir, runtime_dir));
 			candidate_dirs.push_back(exe_dir);
 		}
 	}
-	candidate_dirs.push_back(path_join(current_directory(), "clrpp"));
-	candidate_dirs.push_back(current_directory());
+	candidate_dirs.push_back(path_utils::path_join(path_utils::current_directory(), runtime_dir));
+	candidate_dirs.push_back(path_utils::current_directory());
 
-	std::string managed_dir;
+	std::string bridge_dir;
 	std::string managed_dll;
 	for(const auto& dir : candidate_dirs)
 	{
-		auto candidate = path_join(dir, "Clrpp.Managed.dll");
-		if(path_exists(candidate))
+		auto candidate = path_utils::path_join(dir, "Clrpp.Managed.dll");
+		if(path_utils::path_exists(candidate))
 		{
-			managed_dir = dir;
+			bridge_dir = dir;
 			managed_dll = candidate;
 			break;
 		}
@@ -515,23 +363,23 @@ auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_
 		return false;
 	}
 
-	std::string runtimeconfig = path_join(managed_dir, "Clrpp.Managed.runtimeconfig.json");
-	if(!path_exists(runtimeconfig))
+	std::string runtimeconfig = path_utils::path_join(bridge_dir, "Clrpp.Managed.runtimeconfig.json");
+	if(!path_utils::path_exists(runtimeconfig))
 	{
-		write_default_runtimeconfig(runtimeconfig);
+		write_default_runtimeconfig(runtimeconfig, s.dotnet_version);
 	}
 
 	// -- locate and load hostfxr -------------------------------------------
 	auto dotnet_root = locate_dotnet_root(dotnet_root_override);
-	auto fxr_base = path_join(path_join(dotnet_root, "host"), "fxr");
-	auto fxr_dir = pick_highest_version_dir(fxr_base);
+	auto fxr_base = path_utils::path_join(path_utils::path_join(dotnet_root, "host"), "fxr");
+	auto fxr_dir = path_utils::pick_highest_version_dir(fxr_base);
 	if(fxr_dir.empty())
 	{
 		log_message("clrpp: hostfxr not found under " + fxr_base, "error");
 		return false;
 	}
 
-	auto hostfxr_path = path_join(fxr_dir, hostfxr_library_name());
+	auto hostfxr_path = path_utils::path_join(fxr_dir, hostfxr_library_name());
 	s.hostfxr_lib = load_library(hostfxr_path);
 	if(!s.hostfxr_lib)
 	{
@@ -539,11 +387,11 @@ auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_
 		return false;
 	}
 
-	auto init_fn = reinterpret_cast<hostfxr_initialize_for_runtime_config_fn>(
+	auto init_fn = reinterpret_cast<ANONYMOUS::hostfxr_initialize_for_runtime_config_fn>(
 		get_symbol(s.hostfxr_lib, "hostfxr_initialize_for_runtime_config"));
-	auto get_delegate_fn = reinterpret_cast<hostfxr_get_runtime_delegate_fn>(
+	auto get_delegate_fn = reinterpret_cast<ANONYMOUS::hostfxr_get_runtime_delegate_fn>(
 		get_symbol(s.hostfxr_lib, "hostfxr_get_runtime_delegate"));
-	s.close_fn = reinterpret_cast<hostfxr_close_fn>(get_symbol(s.hostfxr_lib, "hostfxr_close"));
+	s.close_fn = reinterpret_cast<ANONYMOUS::hostfxr_close_fn>(get_symbol(s.hostfxr_lib, "hostfxr_close"));
 
 	if(!init_fn || !get_delegate_fn || !s.close_fn)
 	{
@@ -563,9 +411,9 @@ auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_
 	std::replace(normalized_root.begin(), normalized_root.end(), '/', '\\');
 #endif
 	auto root_path = to_char_t(normalized_root);
-	auto host_path = to_char_t(current_executable_path());
+	auto host_path = to_char_t(path_utils::current_executable_path());
 
-	hostfxr_initialize_parameters params{};
+	ANONYMOUS::hostfxr_initialize_parameters params{};
 	params.size = sizeof(params);
 	params.host_path = host_path.empty() ? nullptr : host_path.c_str();
 	params.dotnet_root = root_path.c_str();
@@ -583,7 +431,7 @@ auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_
 	}
 
 	void* load_assembly_ptr = nullptr;
-	rc = get_delegate_fn(s.context, hdt_load_assembly_and_get_function_pointer, &load_assembly_ptr);
+	rc = get_delegate_fn(s.context, ANONYMOUS::hdt_load_assembly_and_get_function_pointer, &load_assembly_ptr);
 	if(rc != 0 || !load_assembly_ptr)
 	{
 		log_message("clrpp: failed to acquire load_assembly_and_get_function_pointer", "error");
@@ -591,7 +439,7 @@ auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_
 	}
 
 	auto load_assembly_and_get_fn =
-		reinterpret_cast<load_assembly_and_get_function_pointer_fn>(load_assembly_ptr);
+		reinterpret_cast<ANONYMOUS::load_assembly_and_get_function_pointer_fn>(load_assembly_ptr);
 
 	// -- bootstrap the export table ----------------------------------------
 	using bootstrap_fn = int32_t(CLRPP_CALLTYPE*)(void**, int32_t);
@@ -602,7 +450,7 @@ auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_
 	auto method_name = to_char_t("Bootstrap");
 
 	rc = load_assembly_and_get_fn(dll_path.c_str(), type_name.c_str(), method_name.c_str(),
-								  UNMANAGEDCALLERSONLY_METHOD, nullptr,
+								  ANONYMOUS::UNMANAGEDCALLERSONLY_METHOD, nullptr,
 								  reinterpret_cast<void**>(&bootstrap));
 	if(rc != 0 || !bootstrap)
 	{
@@ -672,6 +520,11 @@ auto managed_assembly_path() -> const std::string&
 auto dotnet_root() -> const std::string&
 {
 	return state().dotnet_root;
+}
+
+auto dotnet_version() -> const std::string&
+{
+	return state().dotnet_version;
 }
 
 } // namespace bridge_detail

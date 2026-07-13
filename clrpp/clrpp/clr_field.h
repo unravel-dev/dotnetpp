@@ -2,6 +2,7 @@
 
 #include "clr_bridge.h"
 #include "clr_config.h"
+#include "clr_member_meta.h"
 #include "clr_type.h"
 #include "clr_visibility.h"
 
@@ -59,12 +60,8 @@ protected:
 	std::shared_ptr<meta_info> meta_{};
 };
 
-struct clr_field::meta_info
+struct clr_field::meta_info : clr_member_meta_info
 {
-	std::string name;
-	std::string fullname;
-	std::string full_declname;
-	int32_t flags = 0;
 };
 
 void reset_field_cache();

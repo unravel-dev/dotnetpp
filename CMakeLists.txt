@@ -1,25 +1,26 @@
 cmake_minimum_required(VERSION 3.14)
 
-set(MONOPP_MAIN_PROJECT ON)
+set(DOTNETPP_MAIN_PROJECT ON)
 if(DEFINED PROJECT_SOURCE_DIR)
-    set(MONOPP_MAIN_PROJECT OFF)
+    set(DOTNETPP_MAIN_PROJECT OFF)
 endif()
 
-project(monopp)
+project(dotnetpp)
 include(CTest)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake/utility")
 
-option(BUILD_MONOPP_SHARED "Build as a shared library." ON)
-option(BUILD_MONOPP_CLRPP "Build the clrpp coreclr wrapper library" ON)
-option(BUILD_MONOPP_DOTNETPP "Build the dotnetpp unified wrapper library" ON)
-option(BUILD_MONOPP_TESTS "Build the tests" ${MONOPP_MAIN_PROJECT})
+option(BUILD_DOTNETPP_SHARED "Build as a shared library." ON)
+option(BUILD_DOTNETPP_TESTS "Build the tests" ${DOTNETPP_MAIN_PROJECT})
 
-option(BUILD_MONOPP_WITH_CODE_STYLE_CHECKS "Build with code style checks." OFF)
+set(DOTNETPP_BACKEND "coreclr" CACHE STRING "dotnetpp runtime backend (mono|coreclr)")
+set_property(CACHE DOTNETPP_BACKEND PROPERTY STRINGS mono coreclr)
 
-if(BUILD_MONOPP_TESTS)
+option(BUILD_DOTNETPP_WITH_CODE_STYLE_CHECKS "Build with code style checks." OFF)
+
+if(BUILD_DOTNETPP_TESTS)
 	if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
 		set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 	endif()
@@ -39,29 +40,27 @@ if(BUILD_MONOPP_TESTS)
     endforeach( OUTPUTCONFIG CMAKE_CONFIGURATION_TYPES )
 
     message(STATUS "Enabled ${PROJECT_NAME} tests.")
-
-	set(BUILD_MONOPP_DOTNETPP ON)
 endif()
 
-if(BUILD_MONOPP_SHARED)
+if(BUILD_DOTNETPP_SHARED)
 	set(BUILD_SHARED_LIBS ON)
 endif()
 
-if(BUILD_MONOPP_WITH_CODE_STYLE_CHECKS)
+if(BUILD_DOTNETPP_WITH_CODE_STYLE_CHECKS)
 	set(BUILD_WITH_CODE_STYLE_CHECKS ON)
 endif()
 
-add_subdirectory(monopp)
-
-if(BUILD_MONOPP_CLRPP)
+if(DOTNETPP_BACKEND STREQUAL "mono")
+	add_subdirectory(monopp)
+elseif(DOTNETPP_BACKEND STREQUAL "coreclr")
 	add_subdirectory(clrpp)
+else()
+	message(FATAL_ERROR "${PROJECT_NAME}: unknown DOTNETPP_BACKEND '${DOTNETPP_BACKEND}' (expected 'mono' or 'coreclr')")
 endif()
 
-if(BUILD_MONOPP_DOTNETPP)
-	add_subdirectory(dotnetpp)
-endif()
+add_subdirectory(dotnetpp)
 
-if(BUILD_MONOPP_TESTS)
+if(BUILD_DOTNETPP_TESTS)
     add_subdirectory(3rdparty)
     add_subdirectory(tests)
 

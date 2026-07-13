@@ -2,156 +2,23 @@
 #include "clr_bridge.h"
 #include "clr_exception.h"
 #include "clr_logger.h"
+#include "clr_path_utils.h"
 
 #include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dirent.h>
-#include <sys/stat.h>
-#endif
 
 namespace clr
 {
 
 namespace
 {
-
+namespace ANONYMOUS
+{
 compiler_paths* comp_paths = nullptr;
-
-auto list_subdirectories(const std::string& dir) -> std::vector<std::string>
-{
-	std::vector<std::string> result;
-#ifdef _WIN32
-	WIN32_FIND_DATAA find_data;
-	auto handle = ::FindFirstFileA((dir + "\\*").c_str(), &find_data);
-	if(handle == INVALID_HANDLE_VALUE)
-	{
-		return result;
-	}
-	do
-	{
-		if((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
-		   find_data.cFileName[0] != '.')
-		{
-			result.emplace_back(find_data.cFileName);
-		}
-	} while(::FindNextFileA(handle, &find_data));
-	::FindClose(handle);
-#else
-	if(auto* d = ::opendir(dir.c_str()))
-	{
-		while(auto* entry = ::readdir(d))
-		{
-			if(entry->d_name[0] == '.')
-			{
-				continue;
-			}
-			struct stat st
-			{
-			};
-			if(::stat((dir + "/" + entry->d_name).c_str(), &st) == 0 && S_ISDIR(st.st_mode))
-			{
-				result.emplace_back(entry->d_name);
-			}
-		}
-		::closedir(d);
-	}
-#endif
-	return result;
-}
-
-auto file_exists(const std::string& path) -> bool
-{
-	std::ifstream f(path);
-	return f.good();
-}
-
-auto list_files(const std::string& dir, const std::string& extension) -> std::vector<std::string>
-{
-	std::vector<std::string> result;
-#ifdef _WIN32
-	WIN32_FIND_DATAA find_data;
-	auto handle = ::FindFirstFileA((dir + "\\*" + extension).c_str(), &find_data);
-	if(handle == INVALID_HANDLE_VALUE)
-	{
-		return result;
-	}
-	do
-	{
-		if((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
-		{
-			result.emplace_back(find_data.cFileName);
-		}
-	} while(::FindNextFileA(handle, &find_data));
-	::FindClose(handle);
-#else
-	if(auto* d = ::opendir(dir.c_str()))
-	{
-		while(auto* entry = ::readdir(d))
-		{
-			std::string name = entry->d_name;
-			if(name.size() > extension.size() &&
-			   name.compare(name.size() - extension.size(), extension.size(), extension) == 0)
-			{
-				result.emplace_back(name);
-			}
-		}
-		::closedir(d);
-	}
-#endif
-	return result;
-}
-
-auto parse_version_digits(const std::string& text) -> std::vector<int>
-{
-	std::vector<int> parts;
-	std::string current;
-	for(char c : text)
-	{
-		if(c >= '0' && c <= '9')
-		{
-			current += c;
-		}
-		else if(c == '.')
-		{
-			parts.push_back(current.empty() ? 0 : std::atoi(current.c_str()));
-			current.clear();
-		}
-	}
-	if(!current.empty())
-	{
-		parts.push_back(std::atoi(current.c_str()));
-	}
-	return parts;
-}
-
-auto pick_highest_version_subdir(const std::string& base) -> std::string
-{
-	std::string best;
-	std::vector<int> best_version;
-	for(const auto& name : list_subdirectories(base))
-	{
-		auto version = parse_version_digits(name);
-		if(version.empty())
-		{
-			continue;
-		}
-		if(best.empty() || std::lexicographical_compare(best_version.begin(), best_version.end(),
-														version.begin(), version.end()))
-		{
-			best = name;
-			best_version = version;
-		}
-	}
-	return best;
-}
+} // namespace ANONYMOUS
 
 /*
  * Directory with the framework reference assemblies
@@ -160,6 +27,11 @@ auto pick_highest_version_subdir(const std::string& base) -> std::string
  */
 auto find_reference_assemblies_dir() -> std::string
 {
+	if(ANONYMOUS::comp_paths && !ANONYMOUS::comp_paths->reference_assemblies_dir.empty())
+	{
+		return ANONYMOUS::comp_paths->reference_assemblies_dir;
+	}
+
 	std::vector<std::string> roots;
 	if(!bridge_detail::dotnet_root().empty())
 	{
@@ -173,14 +45,14 @@ auto find_reference_assemblies_dir() -> std::string
 	for(const auto& root : roots)
 	{
 		auto packs = root + "/packs/Microsoft.NETCore.App.Ref";
-		auto version = pick_highest_version_subdir(packs);
+		auto version = path_utils::pick_highest_version_subdir(packs);
 		if(version.empty())
 		{
 			continue;
 		}
 
 		auto ref_root = packs + "/" + version + "/ref";
-		auto tfm = pick_highest_version_subdir(ref_root);
+		auto tfm = path_utils::pick_highest_version_subdir(ref_root);
 		if(tfm.empty())
 		{
 			continue;
@@ -193,9 +65,9 @@ auto find_reference_assemblies_dir() -> std::string
 
 auto clr_dotnet_executable() -> std::string
 {
-	if(comp_paths && !comp_paths->msc_executable.empty())
+	if(ANONYMOUS::comp_paths && !ANONYMOUS::comp_paths->msc_executable.empty())
 	{
-		return comp_paths->msc_executable;
+		return ANONYMOUS::comp_paths->msc_executable;
 	}
 
 	const auto& root = bridge_detail::dotnet_root();
@@ -206,7 +78,7 @@ auto clr_dotnet_executable() -> std::string
 #else
 		auto candidate = root + "/dotnet";
 #endif
-		if(file_exists(candidate))
+		if(path_utils::path_exists(candidate))
 		{
 			return candidate;
 		}
@@ -230,12 +102,12 @@ auto find_csc_dll() -> std::string
 	for(const auto& root : roots)
 	{
 		auto sdk_dir = root + "/sdk";
-		auto versions = list_subdirectories(sdk_dir);
+		auto versions = path_utils::list_subdirectories(sdk_dir);
 		std::sort(versions.rbegin(), versions.rend()); // highest version first
 		for(const auto& version : versions)
 		{
 			auto csc = sdk_dir + "/" + version + "/Roslyn/bincore/csc.dll";
-			if(file_exists(csc))
+			if(path_utils::path_exists(csc))
 			{
 				return csc;
 			}
@@ -273,9 +145,13 @@ auto framework_references() -> const std::vector<std::string>&
 		auto dir = find_reference_assemblies_dir();
 		if(dir.empty())
 		{
+			log_message("clrpp: framework reference assemblies not found (packs/Microsoft.NETCore.App.Ref); "
+						"install a .NET SDK or set compiler_paths::reference_assemblies_dir - "
+						"compilation will fail with CS0518 errors",
+						"error");
 			return result;
 		}
-		for(const auto& name : list_files(dir, ".dll"))
+		for(const auto& name : path_utils::list_files(dir, ".dll"))
 		{
 			result.push_back(dir + "/" + name);
 		}
@@ -412,7 +288,7 @@ auto get_common_executable_paths() -> const std::vector<std::string>&
 
 auto init(const compiler_paths& paths, const debugging_config& debugging) -> bool
 {
-	comp_paths = new compiler_paths(paths);
+	ANONYMOUS::comp_paths = new compiler_paths(paths);
 
 	set_log_handler("default", [](const std::string& msg) { std::cout << msg << std::endl; });
 
@@ -423,7 +299,7 @@ auto init(const compiler_paths& paths, const debugging_config& debugging) -> boo
 		log_message("clrpp: managed debugging is handled by the coreclr debugger services", "info");
 	}
 
-	if(!bridge_detail::initialize(paths.assembly_dir, paths.config_dir))
+	if(!bridge_detail::initialize(paths.assembly_dir, paths.config_dir, paths.managed_dir, paths.dotnet_version))
 	{
 		return false;
 	}
@@ -438,12 +314,17 @@ auto get_core_assembly_path() -> std::string
 	return bridge_detail::dotnet_root();
 }
 
+auto get_dotnet_version() -> const std::string&
+{
+	return bridge_detail::dotnet_version();
+}
+
 void shutdown()
 {
 	bridge_detail::terminate();
 
-	delete comp_paths;
-	comp_paths = nullptr;
+	delete ANONYMOUS::comp_paths;
+	ANONYMOUS::comp_paths = nullptr;
 }
 
 auto create_compile_command(const compiler_params& params) -> std::string
@@ -606,8 +487,12 @@ auto compile(const compiler_params& params) -> bool
 
 auto is_debugger_attached() -> bool
 {
-	// No public embedding query on coreclr; debuggers attach out of band.
-	return false;
+	// Answered managed-side via System.Diagnostics.Debugger.IsAttached.
+	if(!bridge_alive())
+	{
+		return false;
+	}
+	return bridge().is_debugger_attached() != 0;
 }
 
 } // namespace clr

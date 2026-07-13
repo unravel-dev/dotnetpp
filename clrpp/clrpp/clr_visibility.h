@@ -31,4 +31,23 @@ inline auto to_string(visibility vis) -> std::string
 	return "private";
 }
 
+inline auto visibility_from_flags(int32_t flags) -> visibility
+{
+	switch((flags >> 8) & 0x7)
+	{
+		case 0:
+			return visibility::vis_private;
+		case 1:
+			return visibility::vis_protected_internal;
+		case 2:
+			return visibility::vis_internal;
+		case 3:
+			return visibility::vis_protected;
+		case 4:
+			return visibility::vis_public;
+		default:
+			return visibility::vis_private;
+	}
+}
+
 } // namespace clr

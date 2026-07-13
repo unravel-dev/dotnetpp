@@ -1,8 +1,17 @@
 set(target_name clrpp)
 
+set(CLRPP_MANAGED_DIR "clrpp" CACHE STRING
+	"Subdirectory (relative to exe, cwd, or assembly_dir) where Clrpp.Managed runtime files are deployed and probed")
+
 file(GLOB libsrc clrpp/*.h clrpp/*.cpp)
 
 add_library(${target_name} ${libsrc})
+
+# PUBLIC so consumers (engine/editor deploy code) see the same folder name.
+target_compile_definitions(${target_name}
+    PUBLIC
+        CLRPP_MANAGED_DIR="${CLRPP_MANAGED_DIR}"
+)
 
 target_include_directories(${target_name}
     PUBLIC
@@ -55,14 +64,14 @@ if(BUILD_CLRPP_MANAGED)
         if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
             # The whole output dir: bridge dll + runtimeconfig + optional NuGet
             # dependencies (Mono.Cecil, Microsoft.Diagnostics.Runtime, ...).
-            # Deployed into a clrpp/ subfolder to keep bin clean; the native
-            # loader probes <exe_dir>/clrpp and the bridge resolves its own
-            # dependencies from its own directory.
+            # Deployed into a managed-runtime subfolder (CLRPP_MANAGED_DIR) to keep
+            # bin clean; the native loader probes <exe_dir>/<CLRPP_MANAGED_DIR> and
+            # the bridge resolves its own dependencies from its own directory.
             add_custom_command(TARGET clrpp_managed POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_directory
                     ${CLRPP_MANAGED_OUTPUT_DIR}
-                    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/clrpp
-                COMMENT "Copying Clrpp.Managed into clrpp/ next to the executables"
+                    ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${CLRPP_MANAGED_DIR}
+                COMMENT "Copying Clrpp.Managed into ${CLRPP_MANAGED_DIR}/ next to the executables"
                 VERBATIM
             )
         endif()

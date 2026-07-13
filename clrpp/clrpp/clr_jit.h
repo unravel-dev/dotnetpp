@@ -16,6 +16,24 @@ struct compiler_paths
 
 	/// Optional explicit compiler executable (defaults to "dotnet").
 	std::string msc_executable;
+
+	/// Optional explicit directory with framework reference assemblies
+	/// (the netX.Y folder under packs/Microsoft.NETCore.App.Ref/<ver>/ref).
+	/// When empty it is auto-detected from the dotnet root.
+	std::string reference_assemblies_dir;
+
+	/// Subfolder name probed for the managed bridge (Clrpp.Managed.dll)
+	/// under assembly_dir, the executable directory and the working
+	/// directory. Defaults to the compile-time CLRPP_MANAGED_DIR ("clrpp").
+	/// Use assembly_dir to point at an explicit bridge location instead.
+	std::string managed_dir = managed_runtime_dir();
+
+	/// Target .NET version as major.minor (e.g. "10.0"). Written into the
+	/// fallback runtimeconfig and retrievable via get_dotnet_version() so
+	/// tooling (csproj generation, deploys) stays consistent. Note: the
+	/// actual runtime loaded is still governed by the bridge runtimeconfig
+	/// (rollForward LatestMajor picks the newest installed runtime).
+	std::string dotnet_version = default_dotnet_version();
 };
 
 struct debugging_config
@@ -29,6 +47,9 @@ struct debugging_config
 auto init(const compiler_paths& paths = {}, const debugging_config& debugging = {}) -> bool;
 auto get_core_assembly_path() -> std::string;
 void shutdown();
+
+/// Target .NET version (major.minor, e.g. "10.0") configured at init.
+auto get_dotnet_version() -> const std::string&;
 
 struct compiler_params
 {

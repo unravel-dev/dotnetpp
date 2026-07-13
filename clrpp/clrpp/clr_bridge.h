@@ -154,13 +154,22 @@ struct exports
 	// appended
 	void(CLRPP_CALLTYPE* set_internal_call_weaving)(int32_t);
 	clr_handle(CLRPP_CALLTYPE* intern_handle)(clr_handle);
+	int32_t(CLRPP_CALLTYPE* is_debugger_attached)();
 };
 
-// Runtime lifecycle, used by clr::init / clr::shutdown.
-auto initialize(const std::string& assembly_dir, const std::string& dotnet_root_override) -> bool;
+// Runtime lifecycle, used by clr::init / clr::shutdown. managed_dir is the
+// bridge subfolder name probed next to assembly_dir/exe/cwd; empty means the
+// compile-time default (CLRPP_MANAGED_DIR). dotnet_version (major.minor,
+// e.g. "10.0") is used for the fallback runtimeconfig and exposed to tooling;
+// empty means the compile-time default.
+auto initialize(const std::string& assembly_dir,
+				const std::string& dotnet_root_override,
+				const std::string& managed_dir = {},
+				const std::string& dotnet_version = {}) -> bool;
 void terminate();
 auto managed_assembly_path() -> const std::string&;
 auto dotnet_root() -> const std::string&;
+auto dotnet_version() -> const std::string&;
 
 } // namespace bridge_detail
 

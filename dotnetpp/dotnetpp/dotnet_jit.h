@@ -68,5 +68,11 @@ using clr::get_common_executable_paths;
 
 using clr::is_debugger_attached;
 
+/// Name of the managed bridge folder deployed next to the executables.
+using clr::managed_runtime_dir;
+
+/// Target .NET version (major.minor) configured at init.
+using clr::get_dotnet_version;
+
 } // namespace dotnet
 #endif

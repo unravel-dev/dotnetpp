@@ -111,6 +111,7 @@ public static partial class Bridge
             // appended
             (IntPtr)(delegate* unmanaged<int, void>)&SetInternalCallWeaving,
             (IntPtr)(delegate* unmanaged<IntPtr, IntPtr>)&InternHandle,
+            (IntPtr)(delegate* unmanaged<int>)&IsDebuggerAttached,
         };
 
         if (slots != null)

@@ -1,6 +1,8 @@
 #include "clr_field.h"
+#include "clr_bridge_utils.h"
 #include "clr_exception.h"
-#include "clr_object.h"
+#include "clr_member_flags.h"
+#include "clr_member_utils.h"
 
 #include <unordered_map>
 
@@ -9,40 +11,11 @@ namespace clr
 
 namespace
 {
-
-enum field_flag_bits : int32_t
-{
-	flag_static = 1 << 0,
-	flag_readonly = 1 << 1,
-	flag_const = 1 << 2,
-	flag_backing = 1 << 3,
-};
-
-auto visibility_from_flags(int32_t flags) -> visibility
-{
-	switch((flags >> 8) & 0x7)
-	{
-		case 0:
-			return visibility::vis_private;
-		case 1:
-			return visibility::vis_protected_internal;
-		case 2:
-			return visibility::vis_internal;
-		case 3:
-			return visibility::vis_protected;
-		case 4:
-			return visibility::vis_public;
-		default:
-			return visibility::vis_private;
-	}
-}
-
 auto get_field_cache() -> std::unordered_map<clr_handle, std::shared_ptr<clr_field::meta_info>>&
 {
 	static std::unordered_map<clr_handle, std::shared_ptr<clr_field::meta_info>> cache;
 	return cache;
 }
-
 } // namespace
 
 clr_field::clr_field(clr_handle field_handle)
@@ -70,24 +43,14 @@ clr_field::clr_field(const clr_type& type, const std::string& name)
 
 void clr_field::generate_meta(const clr_type& declaring_type)
 {
-	auto& cache = get_field_cache();
-	auto it = cache.find(field_);
-	if(it != cache.end())
-	{
-		meta_ = it->second;
-		return;
-	}
-
-	auto meta = std::make_shared<meta_info>();
-	meta->name = take_string(bridge().field_get_name(field_));
-	meta->fullname = declaring_type.get_fullname() + "." + meta->name;
-	meta->flags = bridge().field_get_flags(field_);
-
-	std::string storage = ((meta->flags & flag_static) != 0 ? " static " : " ");
-	meta->full_declname = to_string(visibility_from_flags(meta->flags)) + storage + meta->fullname;
-
-	cache[field_] = meta;
-	meta_ = meta;
+	meta_ = get_or_create_meta<meta_info>(get_field_cache(), field_,
+										  [&](meta_info& meta)
+										  {
+											  meta.name = take_string(bridge().field_get_name(field_));
+											  meta.fullname = declaring_type.get_fullname() + "." + meta.name;
+											  meta.flags = bridge().field_get_flags(field_);
+											  meta.full_declname = make_member_full_declname(meta.flags, meta.fullname);
+										  });
 }
 
 auto clr_field::get_name() const -> std::string
@@ -117,79 +80,54 @@ auto clr_field::get_visibility() const -> visibility
 
 auto clr_field::is_static() const -> bool
 {
-	return meta_ && (meta_->flags & flag_static) != 0;
+	return meta_ && has_member_flag_static(meta_->flags);
 }
 
 auto clr_field::get_attributes() const -> std::vector<clr_object>
 {
-	std::vector<clr_object> result;
 	if(!field_)
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().field_get_attributes(field_, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().field_get_attributes(field_, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_object(managed_ptr::adopt(handle)));
-	}
-	return result;
+	return fetch_managed_objects(
+		[this](clr_handle* buffer, int32_t count)
+		{ return bridge().field_get_attributes(field_, buffer, count); });
 }
 
 auto clr_field::has_attribute_fullname(const std::string& attribute_full_name) const -> bool
 {
-	return get_attribute_fullname(attribute_full_name).valid();
+	return has_attribute_by_fullname(get_attributes(), attribute_full_name);
 }
 
 auto clr_field::has_attribute(const std::string& attribute_name) const -> bool
 {
-	return get_attribute(attribute_name).valid();
+	return has_attribute_by_name(get_attributes(), attribute_name);
 }
 
 auto clr_field::get_attribute_fullname(const std::string& attribute_full_name) const -> clr_object
 {
-	for(auto& attr : get_attributes())
-	{
-		if(attr.get_type().get_fullname() == attribute_full_name)
-		{
-			return attr;
-		}
-	}
-	return {};
+	return find_attribute_by_fullname(get_attributes(), attribute_full_name);
 }
 
 auto clr_field::get_attribute(const std::string& attribute_name) const -> clr_object
 {
-	for(auto& attr : get_attributes())
-	{
-		if(attr.get_type().get_name() == attribute_name)
-		{
-			return attr;
-		}
-	}
-	return {};
+	return find_attribute_by_name(get_attributes(), attribute_name);
 }
 
 auto clr_field::is_readonly() const -> bool
 {
-	return meta_ && (meta_->flags & flag_readonly) != 0;
+	return meta_ && (meta_->flags & field_flag_readonly) != 0;
 }
 
 auto clr_field::is_const() const -> bool
 {
-	return meta_ && (meta_->flags & flag_const) != 0;
+	return meta_ && (meta_->flags & field_flag_const) != 0;
 }
 
 auto clr_field::is_backing_field() const -> bool
 {
-	return meta_ && (meta_->flags & flag_backing) != 0;
+	return meta_ && (meta_->flags & field_flag_backing) != 0;
 }
 
 auto clr_field::is_valuetype() const -> bool

@@ -1,5 +1,8 @@
 #include "clr_property.h"
+#include "clr_bridge_utils.h"
 #include "clr_exception.h"
+#include "clr_member_flags.h"
+#include "clr_member_utils.h"
 #include "clr_method.h"
 #include "clr_object.h"
 
@@ -10,40 +13,14 @@ namespace clr
 
 namespace
 {
-
-enum property_flag_bits : int32_t
+namespace ANONYMOUS
 {
-	flag_static = 1 << 0,
-	flag_readonly = 1 << 1,
-	flag_special_name = 1 << 3,
-	flag_has_default = 1 << 4,
-};
-
-auto visibility_from_flags(int32_t flags) -> visibility
-{
-	switch((flags >> 8) & 0x7)
-	{
-		case 0:
-			return visibility::vis_private;
-		case 1:
-			return visibility::vis_protected_internal;
-		case 2:
-			return visibility::vis_internal;
-		case 3:
-			return visibility::vis_protected;
-		case 4:
-			return visibility::vis_public;
-		default:
-			return visibility::vis_private;
-	}
-}
-
 auto get_property_cache() -> std::unordered_map<clr_handle, std::shared_ptr<clr_property::meta_info>>&
 {
 	static std::unordered_map<clr_handle, std::shared_ptr<clr_property::meta_info>> cache;
 	return cache;
 }
-
+} // namespace ANONYMOUS
 } // namespace
 
 clr_property::clr_property(clr_handle property_handle)
@@ -71,24 +48,14 @@ clr_property::clr_property(const clr_type& type, const std::string& name)
 
 void clr_property::generate_meta(const clr_type& declaring_type)
 {
-	auto& cache = get_property_cache();
-	auto it = cache.find(property_);
-	if(it != cache.end())
-	{
-		meta_ = it->second;
-		return;
-	}
-
-	auto meta = std::make_shared<meta_info>();
-	meta->name = take_string(bridge().property_get_name(property_));
-	meta->fullname = declaring_type.get_fullname() + "." + meta->name;
-	meta->flags = bridge().property_get_flags(property_);
-
-	std::string storage = ((meta->flags & flag_static) != 0 ? " static " : " ");
-	meta->full_declname = to_string(visibility_from_flags(meta->flags)) + storage + meta->fullname;
-
-	cache[property_] = meta;
-	meta_ = meta;
+	meta_ = get_or_create_meta<meta_info>(ANONYMOUS::get_property_cache(), property_,
+										  [&](meta_info& meta)
+										  {
+											  meta.name = take_string(bridge().property_get_name(property_));
+											  meta.fullname = declaring_type.get_fullname() + "." + meta.name;
+											  meta.flags = bridge().property_get_flags(property_);
+											  meta.full_declname = make_member_full_declname(meta.flags, meta.fullname);
+										  });
 }
 
 auto clr_property::get_name() const -> std::string
@@ -138,79 +105,54 @@ auto clr_property::get_visibility() const -> visibility
 
 auto clr_property::is_static() const -> bool
 {
-	return meta_ && (meta_->flags & flag_static) != 0;
+	return meta_ && has_member_flag_static(meta_->flags);
 }
 
 auto clr_property::is_readonly() const -> bool
 {
-	return meta_ && (meta_->flags & flag_readonly) != 0;
+	return meta_ && (meta_->flags & property_flag_readonly) != 0;
 }
 
 auto clr_property::get_attributes() const -> std::vector<clr_object>
 {
-	std::vector<clr_object> result;
 	if(!property_)
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().property_get_attributes(property_, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().property_get_attributes(property_, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_object(managed_ptr::adopt(handle)));
-	}
-	return result;
+	return fetch_managed_objects(
+		[this](clr_handle* buffer, int32_t count)
+		{ return bridge().property_get_attributes(property_, buffer, count); });
 }
 
 auto clr_property::has_attribute_fullname(const std::string& attribute_full_name) const -> bool
 {
-	return get_attribute_fullname(attribute_full_name).valid();
+	return has_attribute_by_fullname(get_attributes(), attribute_full_name);
 }
 
 auto clr_property::has_attribute(const std::string& attribute_name) const -> bool
 {
-	return get_attribute(attribute_name).valid();
+	return has_attribute_by_name(get_attributes(), attribute_name);
 }
 
 auto clr_property::get_attribute_fullname(const std::string& attribute_full_name) const -> clr_object
 {
-	for(auto& attr : get_attributes())
-	{
-		if(attr.get_type().get_fullname() == attribute_full_name)
-		{
-			return attr;
-		}
-	}
-	return {};
+	return find_attribute_by_fullname(get_attributes(), attribute_full_name);
 }
 
 auto clr_property::get_attribute(const std::string& attribute_name) const -> clr_object
 {
-	for(auto& attr : get_attributes())
-	{
-		if(attr.get_type().get_name() == attribute_name)
-		{
-			return attr;
-		}
-	}
-	return {};
+	return find_attribute_by_name(get_attributes(), attribute_name);
 }
 
 auto clr_property::is_special_name() const -> bool
 {
-	return meta_ && (meta_->flags & flag_special_name) != 0;
+	return meta_ && (meta_->flags & property_flag_special_name) != 0;
 }
 
 auto clr_property::has_default() const -> bool
 {
-	return meta_ && (meta_->flags & flag_has_default) != 0;
+	return meta_ && (meta_->flags & property_flag_has_default) != 0;
 }
 
 auto clr_property::get_internal_ptr() const -> clr_handle
@@ -220,7 +162,7 @@ auto clr_property::get_internal_ptr() const -> clr_handle
 
 void reset_property_cache()
 {
-	get_property_cache().clear();
+	ANONYMOUS::get_property_cache().clear();
 }
 
 } // namespace clr

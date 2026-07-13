@@ -328,6 +328,16 @@ public static partial class Bridge
     }
 
     // ---------------------------------------------------------------------
+    // Diagnostics
+    // ---------------------------------------------------------------------
+
+    [UnmanagedCallersOnly]
+    public static int IsDebuggerAttached()
+    {
+        return System.Diagnostics.Debugger.IsAttached ? 1 : 0;
+    }
+
+    // ---------------------------------------------------------------------
     // Logging callback (native side installs a function pointer)
     // ---------------------------------------------------------------------
 
