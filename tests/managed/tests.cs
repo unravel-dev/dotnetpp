@@ -246,6 +246,123 @@ public struct Vector2f
 	public float y;
 }
 
+// Sub-word field layout probe: bool is 1 byte and char is 2-byte utf16 in
+// the CLR layout (which matches the C++ struct the native side memcpys).
+// Interop-style marshalling (4-byte BOOL, ANSI char) would corrupt every
+// field after `Before` - these tests exist to catch that regression.
+// Layout: Before@0, Value@4, After@8, Letter@10, size 12.
+public struct BoolPack
+{
+	public bool Before;
+	public float Value;
+	public bool After;
+	public char Letter;
+}
+
+// Smaller than its interop-marshalled size (2 bytes vs 8) - round-trips
+// only when the CLR layout is used on both sides.
+public struct TwoBools
+{
+	public bool A;
+	public bool B;
+}
+
+// Mirrors the engine's Entity: a managed struct wrapping a single scalar
+// that the native side receives as a plain integer (entt::entity). Passing
+// it must be indistinguishable from passing the scalar itself, which only
+// holds under the by-value struct ABI - a pointer-passing convention hands
+// native an address where it expects the id.
+public struct WrappedId
+{
+	public uint Id;
+}
+
+class PackTest
+{
+	public static BoolPack packField =
+		new BoolPack { Before = true, Value = 2.5f, After = false, Letter = 'x' };
+
+	public static TwoBools flagsField = new TwoBools { A = true, B = false };
+
+	public static BoolPack MakePack(bool before, float value, bool after, char letter)
+	{
+		return new BoolPack { Before = before, Value = value, After = after, Letter = letter };
+	}
+
+	// Verifies against fixed values so the native caller only needs the
+	// struct argument (mixed known/unknown signature lookups are avoided).
+	public static bool CheckPack(BoolPack p)
+	{
+		return p.Before == true && p.Value == 3.5f && p.After == false && p.Letter == 'k';
+	}
+
+	public static BoolPack InvertPack(BoolPack p)
+	{
+		return new BoolPack
+		{
+			Before = !p.Before,
+			Value = -p.Value,
+			After = !p.After,
+			Letter = (char)(p.Letter + 1)
+		};
+	}
+
+	// Bool-bearing structs through icalls, by value and by ref.
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern BoolPack NativeInvertPack(BoolPack pack);
+
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern void NativeFillPack(ref BoolPack pack);
+
+	public static bool CheckNativeInvertPack()
+	{
+		var inverted = NativeInvertPack(MakePack(true, 2.0f, false, 'a'));
+		return inverted.Before == false && inverted.Value == -2.0f &&
+			   inverted.After == true && inverted.Letter == 'b';
+	}
+
+	public static bool CheckNativeFillPack()
+	{
+		var pack = default(BoolPack);
+		NativeFillPack(ref pack);
+		return pack.Before == true && pack.Value == 7.0f &&
+			   pack.After == false && pack.Letter == 'q';
+	}
+
+	// Scalar-wrapper struct (see WrappedId): native registers a function
+	// taking/returning a plain uint32_t, exactly like the engine's Entity
+	// icalls take entt::entity.
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern WrappedId NativeBumpId(WrappedId id);
+
+	public static bool CheckNativeBumpId()
+	{
+		var bumped = NativeBumpId(new WrappedId { Id = 41 });
+		return bumped.Id == 42;
+	}
+
+	// Standalone chars widen to int32 on the wire (the default interop
+	// treatment of char in an unmanaged signature is 1-byte ANSI, which
+	// would truncate utf16 values).
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern char NativeNextChar(char value);
+
+	public static bool CheckNativeNextChar()
+	{
+		return NativeNextChar('a') == 'b' && NativeNextChar('\u03B1') == '\u03B2';
+	}
+
+	public struct NotBlittable
+	{
+		public string Name;
+	}
+
+	// Never invoked: the weaver must skip this one (reference field in a
+	// by-value struct) without affecting the other externs in this class.
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern void RejectNonBlittable(NotBlittable value);
+}
+
 class MonortTest
 {
 	[MethodImpl(MethodImplOptions.InternalCall)]

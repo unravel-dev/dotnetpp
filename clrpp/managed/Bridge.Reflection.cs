@@ -226,6 +226,10 @@ public static partial class Bridge
         return IntPtr.Zero;
     }
 
+    /// Size as copied across the boundary: the CLR layout for value types
+    /// (bool = 1, char = 2 - NOT Marshal.SizeOf, which reports the interop
+    /// layout), pointer size for reference types. 0 for types that cannot
+    /// cross by value (reference-bearing structs).
     [UnmanagedCallersOnly]
     public static int TypeGetSizeof(IntPtr typeHandle)
     {
@@ -237,27 +241,7 @@ public static partial class Bridge
 
         try
         {
-            if (type == typeof(bool))
-            {
-                return 1;
-            }
-
-            if (type == typeof(char))
-            {
-                return 2;
-            }
-
-            if (type.IsEnum)
-            {
-                return Marshal.SizeOf(Enum.GetUnderlyingType(type));
-            }
-
-            if (type.IsValueType)
-            {
-                return Marshal.SizeOf(type);
-            }
-
-            return IntPtr.Size;
+            return type.IsValueType ? ClrLayout.SizeOf(type) : IntPtr.Size;
         }
         catch
         {
@@ -274,51 +258,43 @@ public static partial class Bridge
             return 0;
         }
 
-        // Approximation: alignment of a struct is the max field alignment,
-        // bounded by pointer size, same rule mono uses for blittable data.
         try
         {
-            if (!type.IsValueType)
-            {
-                return IntPtr.Size;
-            }
-
-            if (type.IsEnum)
-            {
-                return Marshal.SizeOf(Enum.GetUnderlyingType(type));
-            }
-
-            if (type.IsPrimitive)
-            {
-                if (type == typeof(bool))
-                {
-                    return 1;
-                }
-
-                if (type == typeof(char))
-                {
-                    return 2;
-                }
-
-                return Math.Min(Marshal.SizeOf(type), IntPtr.Size);
-            }
-
-            int align = 1;
-            foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-            {
-                var ft = field.FieldType;
-                int fieldAlign = ft.IsValueType && ft.IsPrimitive
-                    ? Math.Min(Marshal.SizeOf(ft), IntPtr.Size)
-                    : IntPtr.Size;
-                align = Math.Max(align, fieldAlign);
-            }
-
-            return align;
+            return ClrAlignOf(type);
         }
         catch
         {
             return IntPtr.Size;
         }
+    }
+
+    /// Approximation matching C++ rules for blittable data: primitives align
+    /// to their own size (capped at pointer size), structs to their most
+    /// aligned field, recursively.
+    private static int ClrAlignOf(Type type)
+    {
+        if (!type.IsValueType)
+        {
+            return IntPtr.Size;
+        }
+
+        if (type.IsEnum)
+        {
+            return ClrLayout.SizeOf(Enum.GetUnderlyingType(type));
+        }
+
+        if (type.IsPrimitive)
+        {
+            return Math.Min(ClrLayout.SizeOf(type), IntPtr.Size);
+        }
+
+        int align = 1;
+        foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            align = Math.Max(align, ClrAlignOf(field.FieldType));
+        }
+
+        return align;
     }
 
     [UnmanagedCallersOnly]

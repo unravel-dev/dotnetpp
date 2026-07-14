@@ -23,6 +23,25 @@ struct dn_vec2
 	float x;
 	float y;
 };
+
+// Mirrors Tests.BoolPack: bool is 1 byte and char16_t 2 bytes on both
+// sides, so the layouts agree byte for byte (bool@0, float@4, bool@8,
+// char@10, size 12). Guards against interop-style marshalling creeping
+// back in (4-byte BOOL would shift/corrupt every field after `before`).
+struct dn_bool_pack
+{
+	bool before;
+	float value;
+	bool after;
+	char16_t letter;
+};
+
+// Mirrors Tests.TwoBools (2 bytes - interop marshalling would claim 8).
+struct dn_two_bools
+{
+	bool a;
+	bool b;
+};
 } // namespace
 
 namespace dotnetpp
@@ -62,6 +81,36 @@ void MonoppTest_ThrowNative()
 auto MonoppTest_NativeAdd(int a, int b) -> int
 {
 	return a + b;
+}
+
+// Bool-bearing struct by value in both directions.
+auto PackTest_NativeInvertPack(const dn_bool_pack& pack) -> dn_bool_pack
+{
+	return {!pack.before, -pack.value, !pack.after, static_cast<char16_t>(pack.letter + 1)};
+}
+
+// Bool-bearing struct written through a by-ref (out) parameter.
+void PackTest_NativeFillPack(dn_bool_pack* pack)
+{
+	pack->before = true;
+	pack->value = 7.0f;
+	pack->after = false;
+	pack->letter = u'q';
+}
+
+// The engine's Entity pattern: managed passes a struct wrapping a single
+// scalar (Tests.WrappedId), native receives the scalar itself - exactly
+// like glue functions taking entt::entity. Only works with the by-value
+// struct ABI (a one-field struct and its scalar are ABI-identical).
+auto PackTest_NativeBumpId(uint32_t id) -> uint32_t
+{
+	return id + 1;
+}
+
+// Standalone utf16 char round-trip (widened to int32 on the clr wire).
+auto PackTest_NativeNextChar(char16_t value) -> char16_t
+{
+	return static_cast<char16_t>(value + 1);
 }
 
 void test_suite()
@@ -118,6 +167,16 @@ void test_suite()
 			dotnet::internal_call_registry registry("Tests.MonoppTest");
 			registry.add_internal_call("ThrowNative", dotnet_internal_call(MonoppTest_ThrowNative));
 			registry.add_internal_call("NativeAdd", dotnet_internal_call(MonoppTest_NativeAdd));
+
+			dotnet::internal_call_registry pack_registry("Tests.PackTest");
+			pack_registry.add_internal_call("NativeInvertPack",
+											dotnet_internal_call(PackTest_NativeInvertPack));
+			pack_registry.add_internal_call("NativeFillPack",
+											dotnet_internal_call(PackTest_NativeFillPack));
+			pack_registry.add_internal_call("NativeBumpId",
+											dotnet_internal_call(PackTest_NativeBumpId));
+			pack_registry.add_internal_call("NativeNextChar",
+											dotnet_internal_call(PackTest_NativeNextChar));
 		};
 		EXPECT_NOTHROWS(expression());
 	};
@@ -844,6 +903,205 @@ void test_suite()
 			auto unboxed = dotnet::unbox_value<dn_vec2>(boxed);
 			EXPECT(unboxed.x == 3.0f);
 			EXPECT(unboxed.y == 4.0f);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : bool-bearing struct layout and box/unbox")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+
+			// Sizes must reflect the copied (CLR) layout, not the interop-
+			// marshalled one (which would report 12 -> 20 and 2 -> 8).
+			auto pack_type = assembly.get_type("Tests", "BoolPack");
+			EXPECT(pack_type.get_sizeof() == sizeof(dn_bool_pack));
+
+			auto flags_type = assembly.get_type("Tests", "TwoBools");
+			EXPECT(flags_type.get_sizeof() == sizeof(dn_two_bools));
+
+			dn_bool_pack value = {true, 2.5f, false, u'x'};
+			auto boxed = dotnet::box_value(value, pack_type);
+			EXPECT(boxed.valid());
+
+			auto unboxed = dotnet::unbox_value<dn_bool_pack>(boxed);
+			EXPECT(unboxed.before == true);
+			EXPECT(unboxed.value == 2.5f);
+			EXPECT(unboxed.after == false);
+			EXPECT(unboxed.letter == u'x');
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : bool-bearing struct method arguments and returns")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "PackTest");
+
+			// bool/char arguments in, struct blob out.
+			auto make =
+				dotnet::make_method_invoker<dn_bool_pack(bool, float, bool, char16_t)>(type, "MakePack");
+			auto pack = make(true, 3.5f, false, u'k');
+			EXPECT(pack.before == true);
+			EXPECT(pack.value == 3.5f);
+			EXPECT(pack.after == false);
+			EXPECT(pack.letter == u'k');
+
+			// Struct blob in, verified field-by-field on the managed side.
+			auto check = dotnet::make_method_invoker<bool(dn_bool_pack)>(type, "CheckPack");
+			EXPECT(check(pack) == true);
+
+			// Struct in both directions.
+			auto invert = dotnet::make_method_invoker<dn_bool_pack(dn_bool_pack)>(type, "InvertPack");
+			auto inverted = invert(pack);
+			EXPECT(inverted.before == false);
+			EXPECT(inverted.value == -3.5f);
+			EXPECT(inverted.after == true);
+			EXPECT(inverted.letter == u'l');
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : bool-bearing struct fields")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "PackTest");
+
+			auto pack_field = dotnet::make_field_invoker<dn_bool_pack>(type.get_field("packField"));
+			auto pack = pack_field.get_value();
+			EXPECT(pack.before == true);
+			EXPECT(pack.value == 2.5f);
+			EXPECT(pack.after == false);
+			EXPECT(pack.letter == u'x');
+
+			dn_bool_pack changed = {false, -1.5f, true, u'z'};
+			pack_field.set_value(changed);
+			pack = pack_field.get_value();
+			EXPECT(pack.before == false);
+			EXPECT(pack.value == -1.5f);
+			EXPECT(pack.after == true);
+			EXPECT(pack.letter == u'z');
+
+			// 2-byte struct: fits its blob only with the CLR layout.
+			auto flags_field = dotnet::make_field_invoker<dn_two_bools>(type.get_field("flagsField"));
+			auto flags = flags_field.get_value();
+			EXPECT(flags.a == true);
+			EXPECT(flags.b == false);
+
+			dn_two_bools swapped = {false, true};
+			flags_field.set_value(swapped);
+			flags = flags_field.get_value();
+			EXPECT(flags.a == false);
+			EXPECT(flags.b == true);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : bool-bearing struct internal calls")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "PackTest");
+
+			// By-value struct icall, checked from the managed side.
+			auto check_invert = dotnet::make_method_invoker<bool()>(type, "CheckNativeInvertPack");
+			EXPECT(check_invert() == true);
+
+			// By-ref (out) struct icall.
+			auto check_fill = dotnet::make_method_invoker<bool()>(type, "CheckNativeFillPack");
+			EXPECT(check_fill() == true);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : scalar-wrapper struct internal calls")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "PackTest");
+
+			// Managed struct wrapping one scalar <-> native plain uint32_t,
+			// the engine's Entity/entt::entity mapping. Regression test for
+			// the pointer-passing ABI, which broke this silently (native
+			// read the pointer bits as the id -> "Entity is invalid").
+			auto check_bump = dotnet::make_method_invoker<bool()>(type, "CheckNativeBumpId");
+			EXPECT(check_bump() == true);
+
+			// Standalone utf16 chars (would truncate under ANSI marshalling).
+			auto check_char = dotnet::make_method_invoker<bool()>(type, "CheckNativeNextChar");
+			EXPECT(check_char() == true);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : bool arrays")
+	{
+		auto expression = [&]()
+		{
+			// bool[] elements are 1 byte on both sides.
+			std::vector<bool> values = {true, false, true, true};
+			dotnet::array<bool> arr(values);
+			EXPECT(arr.size() == values.size());
+			for(size_t i = 0; i < values.size(); ++i)
+			{
+				EXPECT(arr.get(i) == values[i]);
+			}
+
+			arr.set(1, true);
+			EXPECT(arr.get(1) == true);
+
+			auto back = arr.to_vector();
+			EXPECT(back.size() == values.size());
+			EXPECT(back[1] == true);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : typed struct arrays")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+
+			// A real managed element type (not the raw byte fallback):
+			// bulk copies must handle non-primitive element arrays.
+			auto vec_type = assembly.get_type("Tests", "Vector2f");
+			std::vector<dn_vec2> vecs = {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}};
+			dotnet::array<dn_vec2> vec_arr(vecs, vec_type);
+			EXPECT(vec_arr.size() == vecs.size());
+
+			auto element = vec_arr.get(1);
+			EXPECT(element.x == 3.0f);
+			EXPECT(element.y == 4.0f);
+
+			vec_arr.set(0, {9.0f, 8.0f});
+			element = vec_arr.get(0);
+			EXPECT(element.x == 9.0f);
+			EXPECT(element.y == 8.0f);
+
+			auto back = vec_arr.to_vector();
+			EXPECT(back.size() == vecs.size());
+			EXPECT(back[2].y == 6.0f);
+
+			// Element type with sub-word fields: per-element offsets only
+			// line up when both sides agree on the 12-byte layout.
+			auto pack_type = assembly.get_type("Tests", "BoolPack");
+			std::vector<dn_bool_pack> packs = {{true, 1.0f, false, u'a'}, {false, 2.0f, true, u'b'}};
+			dotnet::array<dn_bool_pack> pack_arr(packs, pack_type);
+			EXPECT(pack_arr.size() == packs.size());
+
+			auto pack = pack_arr.get(1);
+			EXPECT(pack.before == false);
+			EXPECT(pack.value == 2.0f);
+			EXPECT(pack.after == true);
+			EXPECT(pack.letter == u'b');
 		};
 		EXPECT_NOTHROWS(expression());
 	};

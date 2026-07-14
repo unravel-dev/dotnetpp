@@ -132,9 +132,16 @@ public:
 
 	auto get(size_t index) const -> T
 	{
+		// Offsets assume the managed element size equals sizeof(T); a short
+		// or failed copy (layout mismatch, reference-bearing elements) must
+		// not silently yield a zeroed value.
 		T value{};
-		bridge().array_copy_to(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
-							   std::addressof(value), static_cast<int64_t>(sizeof(T)));
+		auto copied = bridge().array_copy_to(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
+											 std::addressof(value), static_cast<int64_t>(sizeof(T)));
+		if(copied != static_cast<int64_t>(sizeof(T)))
+		{
+			throw clr_exception("NATIVE::array element read failed (element layout mismatch?)");
+		}
 		return value;
 	}
 
@@ -147,8 +154,13 @@ public:
 
 	void set(size_t index, const T& value)
 	{
-		bridge().array_copy_from(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
-								 std::addressof(value), static_cast<int64_t>(sizeof(T)));
+		auto copied =
+			bridge().array_copy_from(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
+									 std::addressof(value), static_cast<int64_t>(sizeof(T)));
+		if(copied != static_cast<int64_t>(sizeof(T)))
+		{
+			throw clr_exception("NATIVE::array element write failed (element layout mismatch?)");
+		}
 	}
 
 	template <typename VectorLike = std::vector<T>>

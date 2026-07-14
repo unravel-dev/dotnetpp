@@ -52,8 +52,9 @@ public static partial class Bridge
 ///     first invocation too, so registration order requirements stay
 ///     identical),
 ///   - arguments are marshalled inline (strings as utf8 allocations, objects
-///     as GCHandles, bools widened to int32, by-ref value types as pinned
-///     pointers - matching the native clr_internal_call ABI),
+///     as GCHandles, bools and chars widened to int32, by-ref value types as
+///     pinned raw pointers, structs by value - matching the native
+///     clr_internal_call ABI),
 ///   - the function pointer is invoked via calli, marshalled resources are
 ///     released and the pending native exception is rethrown.
 ///
@@ -126,6 +127,14 @@ internal static class IcallWeaver
         }
 
         var refs = new WellKnownReferences(module);
+
+        // Structs cross the boundary by value with the raw CLR/C++ layout.
+        // The runtime interop-marshals bool fields as 4-byte BOOL and char
+        // fields as 1-byte ANSI by default, which would silently corrupt
+        // that layout - so every struct reachable from an icall signature
+        // (and defined in this module) gets its bool/char fields annotated
+        // with U1/U2 marshalling, making the interop copy byte-identical.
+        NormalizeIcallStructMarshalling(targets);
 
         int woven = 0;
         foreach (var method in targets)
@@ -214,8 +223,9 @@ internal static class IcallWeaver
     // (see the ABI contract in clr_internal_call.h).
     private enum ArgKind
     {
-        Value,      // blittable value type, passed by value
+        Value,      // scalar or blittable struct, passed by value
         Bool,       // widened to int32
+        Char,       // widened to int32 (default interop would be 1-byte ANSI)
         String,     // utf8 allocation, freed after the call
         Object,     // GCHandle, freed after the call
         ByRefValue, // pinned pointer to the value
@@ -233,12 +243,157 @@ internal static class IcallWeaver
             return ArgKind.Bool;
         }
 
+        if (type.MetadataType == MetadataType.Char)
+        {
+            return ArgKind.Char;
+        }
+
         if (type.MetadataType == MetadataType.String)
         {
             return ArgKind.String;
         }
 
         return type.IsValueType ? ArgKind.Value : ArgKind.Object;
+    }
+
+    /// <summary>
+    /// Annotates bool fields with U1 and char fields with U2 marshalling on
+    /// every struct that appears in an icall signature (recursively through
+    /// struct fields), so the interop layout matches the CLR/C++ layout when
+    /// the struct crosses by value. Only definitions in this module can be
+    /// annotated; structs defined elsewhere are expected to have been
+    /// normalized when their own assembly was woven (WeaveMethod validates
+    /// this and skips the icall otherwise). Fields with an explicit
+    /// MarshalAs are left alone - the validation catches conflicts.
+    /// </summary>
+    private static void NormalizeIcallStructMarshalling(List<MethodDefinition> targets)
+    {
+        var seen = new HashSet<TypeDefinition>();
+        var wovenModule = targets.Count > 0 ? targets[0].Module : null;
+
+        void Visit(TypeReference type)
+        {
+            if (type is ByReferenceType byRef)
+            {
+                type = byRef.ElementType;
+            }
+            if (type == null || !type.IsValueType || type.IsPrimitive)
+            {
+                return;
+            }
+
+            TypeDefinition definition;
+            try
+            {
+                definition = type.Resolve();
+            }
+            catch
+            {
+                return;
+            }
+
+            // Only definitions in the module being written can be annotated;
+            // external structs must have been normalized by their own weave.
+            if (definition == null || definition.IsEnum || !definition.IsValueType ||
+                definition.Module != wovenModule || !seen.Add(definition))
+            {
+                return;
+            }
+
+            foreach (var field in definition.Fields)
+            {
+                if (field.IsStatic)
+                {
+                    continue;
+                }
+
+                if (!field.HasMarshalInfo)
+                {
+                    if (field.FieldType.MetadataType == MetadataType.Boolean)
+                    {
+                        field.MarshalInfo = new MarshalInfo(NativeType.U1);
+                        field.Attributes |= FieldAttributes.HasFieldMarshal;
+                    }
+                    else if (field.FieldType.MetadataType == MetadataType.Char)
+                    {
+                        field.MarshalInfo = new MarshalInfo(NativeType.U2);
+                        field.Attributes |= FieldAttributes.HasFieldMarshal;
+                    }
+                }
+
+                Visit(field.FieldType);
+            }
+        }
+
+        foreach (var method in targets)
+        {
+            foreach (var parameter in method.Parameters)
+            {
+                Visit(parameter.ParameterType);
+            }
+            Visit(method.ReturnType);
+        }
+    }
+
+    /// <summary>
+    /// True when every bool/char field of the struct (recursively) carries
+    /// U1/U2 marshalling, i.e. its interop-marshalled layout is
+    /// byte-identical to the CLR/C++ layout. Structs that fail this would
+    /// silently corrupt when passed by value. Unresolvable types are
+    /// accepted (consistent with IsBlittableStruct's leniency).
+    /// </summary>
+    private static bool HasNormalizedMarshalling(TypeReference type)
+    {
+        if (type.IsPrimitive || type.IsPointer ||
+            type.MetadataType == MetadataType.IntPtr || type.MetadataType == MetadataType.UIntPtr)
+        {
+            return true;
+        }
+
+        TypeDefinition definition;
+        try
+        {
+            definition = type.Resolve();
+        }
+        catch
+        {
+            return true;
+        }
+
+        if (definition == null || definition.IsEnum || !definition.IsValueType)
+        {
+            return true;
+        }
+
+        foreach (var field in definition.Fields)
+        {
+            if (field.IsStatic)
+            {
+                continue;
+            }
+
+            var metadataType = field.FieldType.MetadataType;
+            if (metadataType == MetadataType.Boolean)
+            {
+                if (!field.HasMarshalInfo || field.MarshalInfo.NativeType != NativeType.U1)
+                {
+                    return false;
+                }
+            }
+            else if (metadataType == MetadataType.Char)
+            {
+                if (!field.HasMarshalInfo || field.MarshalInfo.NativeType != NativeType.U2)
+                {
+                    return false;
+                }
+            }
+            else if (!HasNormalizedMarshalling(field.FieldType))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool WeaveMethod(MethodDefinition method, WellKnownReferences refs, int index)
@@ -271,6 +426,27 @@ internal static class IcallWeaver
                 Warn(method, $"unsupported parameter type {parameterType.FullName}");
                 return false;
             }
+            // Value types cross by raw copy - a struct with reference fields
+            // would hand GC-tracked pointers to native code.
+            var valueType = parameterType.IsByReference
+                ? ((ByReferenceType)parameterType).ElementType
+                : parameterType;
+            if (valueType.IsValueType && !IsBlittableStruct(valueType))
+            {
+                Warn(method, $"non-blittable struct parameter {valueType.FullName}");
+                return false;
+            }
+            // By-value structs are interop-marshalled by the runtime; the
+            // layout only matches C++ when bool/char fields carry U1/U2
+            // marshalling (annotated by NormalizeIcallStructMarshalling for
+            // this module's structs - a failure here means the struct comes
+            // from an assembly that was not woven).
+            if (valueType.IsValueType && !parameterType.IsByReference &&
+                !HasNormalizedMarshalling(valueType))
+            {
+                Warn(method, $"struct {valueType.FullName} has bool/char fields without U1/U2 marshalling");
+                return false;
+            }
         }
 
         var returnType = method.ReturnType;
@@ -278,6 +454,19 @@ internal static class IcallWeaver
         {
             Warn(method, $"unsupported return type {returnType.FullName}");
             return false;
+        }
+        if (returnType.MetadataType != MetadataType.Void && returnType.IsValueType)
+        {
+            if (!IsBlittableStruct(returnType))
+            {
+                Warn(method, $"non-blittable struct return type {returnType.FullName}");
+                return false;
+            }
+            if (!HasNormalizedMarshalling(returnType))
+            {
+                Warn(method, $"struct {returnType.FullName} has bool/char fields without U1/U2 marshalling");
+                return false;
+            }
         }
 
         // Cached native function pointer. Lives on the synthetic
@@ -394,6 +583,7 @@ internal static class IcallWeaver
         }
 
         // Push the arguments and the cached target pointer, then raw-call.
+        var returnKind = ClassifyReturn(returnType);
         var callSite = new CallSite(NativeReturnType(returnType, ts))
         {
             CallingConvention = MethodCallingConvention.C,
@@ -416,13 +606,17 @@ internal static class IcallWeaver
                     break;
 
                 case ArgKind.Bool:
-                    // Bools travel as int32 (see icall_abi<bool> on the
-                    // native side); a bool is already an int32 on the stack.
+                case ArgKind.Char:
+                    // Bools and chars travel as int32 (see icall_abi<bool> /
+                    // icall_abi<char16_t> on the native side); both are
+                    // already an int32 on the IL stack.
                     LoadSource(i);
                     callSite.Parameters.Add(new ParameterDefinition(ts.Int32));
                     break;
 
                 default:
+                    // Scalars and structs by value. Struct layouts match C++
+                    // thanks to the U1/U2 field marshalling normalization.
                     LoadSource(i);
                     callSite.Parameters.Add(new ParameterDefinition(sources[i].ParameterType));
                     break;
@@ -451,7 +645,7 @@ internal static class IcallWeaver
 
         il.Emit(OpCodes.Call, refs.ThrowIfPending);
 
-        switch (ClassifyReturn(returnType))
+        switch (returnKind)
         {
             case ArgKind.String:
                 il.Emit(OpCodes.Ldloc, result);
@@ -463,6 +657,12 @@ internal static class IcallWeaver
                 il.Emit(OpCodes.Ldloc, result);
                 il.Emit(OpCodes.Ldc_I4_0);
                 il.Emit(OpCodes.Cgt_Un);
+                break;
+
+            case ArgKind.Char:
+                // Truncate the int32 wire value back to a utf16 char.
+                il.Emit(OpCodes.Ldloc, result);
+                il.Emit(OpCodes.Conv_U2);
                 break;
 
             case ArgKind.Object:
@@ -493,6 +693,54 @@ internal static class IcallWeaver
         return returnType.MetadataType == MetadataType.Void ? ArgKind.Value : ClassifyArg(returnType);
     }
 
+    /// A value type crossing the boundary by raw copy must not contain
+    /// object references. Checked recursively over instance fields; types
+    /// that cannot be resolved (e.g. generic parameters, missing reference
+    /// assemblies) are assumed blittable rather than rejected.
+    private static bool IsBlittableStruct(TypeReference type)
+    {
+        if (type.IsPrimitive || type.IsPointer || type.IsFunctionPointer ||
+            type.MetadataType == MetadataType.IntPtr || type.MetadataType == MetadataType.UIntPtr)
+        {
+            return true;
+        }
+
+        TypeDefinition definition;
+        try
+        {
+            definition = type.Resolve();
+        }
+        catch
+        {
+            return true;
+        }
+
+        if (definition == null)
+        {
+            return true;
+        }
+
+        if (definition.IsEnum)
+        {
+            return true;
+        }
+
+        if (!definition.IsValueType)
+        {
+            return false;
+        }
+
+        foreach (var field in definition.Fields)
+        {
+            if (!field.IsStatic && !IsBlittableStruct(field.FieldType))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static TypeReference NativeReturnType(TypeReference returnType, TypeSystem ts)
     {
         switch (ClassifyReturn(returnType))
@@ -501,8 +749,10 @@ internal static class IcallWeaver
             case ArgKind.Object:
                 return ts.IntPtr;
             case ArgKind.Bool:
+            case ArgKind.Char:
                 return ts.Int32;
             default:
+                // Scalars and structs return by value per the platform ABI.
                 return returnType;
         }
     }

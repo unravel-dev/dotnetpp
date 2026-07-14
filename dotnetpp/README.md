@@ -53,8 +53,8 @@ Both backends share the `to_mono`/`from_mono` protocol names (read "mono" as
   ```
 
   The generated thunk handles strings (utf8 alloc/free/consume), reference
-  types (GCHandle alloc/free/consume), blittable value types by value, and
-  the pending exception check. Bind resolves eagerly (throws
+  types (GCHandle alloc/free/consume), scalars by value, blittable structs
+  by pointer, and the pending exception check. Bind resolves eagerly (throws
   `MissingMethodException` if unregistered), so keep bindings in static
   fields - C# type initializers run lazily, after the native side registered
   its calls.
@@ -93,9 +93,18 @@ Details:
   (`"Tests.MyObject::ReturnAString"`), matching how registrations are
   written for `mono::add_internal_call`.
 - The woven body marshals inline (strings as utf8 allocations, objects as
-  GCHandles, bools widened to int32, by-ref value types as pinned pointers)
-  and contains no runtime code generation, so woven assemblies work on
-  AOT-only platforms.
+  GCHandles, bools and chars widened to int32, by-ref value types as pinned
+  raw pointers, structs by value) and contains no runtime code generation,
+  so woven assemblies work on AOT-only platforms.
+- Structs cross by value so that a managed wrapper struct stays
+  interchangeable with a native scalar of the same size (the engine's
+  `Entity{uint}` maps onto `entt::entity` this way). Because the runtime
+  interop-marshals by-value structs in a `calli` signature (bool as 4-byte
+  BOOL, char as 1-byte ANSI by default), the weaver annotates bool/char
+  fields of every struct reachable from an icall signature with
+  `MarshalAs(U1/U2)`, making the interop layout byte-identical to the raw
+  CLR/C++ one. Structs defined in a different, unwoven assembly that lack
+  those annotations are rejected with a warning.
 - Icalls already registered natively are pre-bound when the assembly loads
   (a synthetic `Clrpp.Woven.IcallBinder.BindAll()` runs after load); icalls
   registered later bind lazily on first invocation, so registration order
@@ -103,9 +112,10 @@ Details:
 - `dotnet::weave_assembly(path)` runs the same rewrite on an existing dll
   (rewrites dll/pdb in place; a no-op returning true on the mono backend).
   Requires `Mono.Cecil.dll` next to `Clrpp.Managed.dll`.
-- Unsupported shapes (generic methods/types, by-ref/pointer parameters,
-  instance icalls on structs) are skipped with a warning and fail at
-  invocation time, exactly as an unwoven extern would.
+- Unsupported shapes (generic methods/types, pointer parameters, by-ref
+  reference types, instance icalls on structs, and structs containing
+  object references - those cannot cross by raw copy) are skipped with a
+  warning and fail at invocation time, exactly as an unwoven extern would.
 
 ### Domains
 

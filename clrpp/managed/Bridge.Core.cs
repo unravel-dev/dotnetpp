@@ -185,25 +185,18 @@ public static partial class Bridge
                     throw new ArgumentException("Blob variant requires an expected type");
                 }
 
-                var type = expectedType;
-                if (type.IsEnum)
+                // The blob is a raw C++ value copy - read it with the CLR
+                // layout (see ClrLayout; covers primitives, enums and
+                // blittable structs). Marshal.PtrToStructure would misread
+                // bool/char fields.
+                var expected = ClrLayout.SizeOf(expectedType);
+                if (variant.Size > 0 && variant.Size < expected)
                 {
-                    var boxedUnderlying = Marshal.PtrToStructure(variant.Data, Enum.GetUnderlyingType(type));
-                    return Enum.ToObject(type, boxedUnderlying);
+                    throw new ArgumentException(
+                        $"Blob of {variant.Size} bytes is too small for {expectedType} ({expected} bytes)");
                 }
 
-                if (type == typeof(bool))
-                {
-                    // native bool is 1 byte, managed Marshal.SizeOf(bool) is 4
-                    return Marshal.ReadByte(variant.Data) != 0;
-                }
-
-                if (type == typeof(char))
-                {
-                    return (char)Marshal.ReadInt16(variant.Data);
-                }
-
-                return Marshal.PtrToStructure(variant.Data, type);
+                return ClrLayout.Read(expectedType, variant.Data);
             }
 
             default:

@@ -83,7 +83,7 @@ if(BUILD_CLRPP_MANAGED)
         add_custom_command(
             OUTPUT ${CLRPP_MANAGED_DLL}
             COMMAND ${DOTNET_EXECUTABLE} build ${CLRPP_MANAGED_PROJECT} -c Release -o ${CLRPP_MANAGED_OUTPUT_DIR}
-                    -p:ClrppDotnetVersion=${CLRPP_DOTNET_VERSION} --nologo -v q
+                    -p:ClrppDotnetVersion=${CLRPP_DOTNET_VERSION} --nologo -v minimal
             DEPENDS ${CLRPP_MANAGED_SOURCES} ${CLRPP_MANAGED_PROJECT}
             COMMENT "Building Clrpp.Managed bridge assembly (net${CLRPP_DOTNET_VERSION})"
             VERBATIM

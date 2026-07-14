@@ -51,7 +51,7 @@ public static partial class Bridge
             return IntPtr.Zero;
         }
 
-        // Marshal.PtrToStructure throws for non-marshalable types; that must
+        // Conversion throws for non-value/reference-bearing types; that must
         // not escape an UnmanagedCallersOnly export (process fail-fast).
         try
         {
@@ -87,38 +87,13 @@ public static partial class Bridge
         }
     }
 
+    /// Writes a value's raw bytes into a native buffer using the CLR layout
+    /// (see ClrLayout - the native side reads them as a C++ struct copy).
+    /// Handles primitives, enums and blittable structs; returns bytes
+    /// written, or -1 when the value does not fit.
     internal static int WriteValue(object value, IntPtr buffer, int size)
     {
-        var type = value.GetType();
-
-        if (type.IsEnum)
-        {
-            value = Convert.ChangeType(value, Enum.GetUnderlyingType(type));
-            type = value.GetType();
-        }
-
-        if (type == typeof(bool))
-        {
-            if (size < 1) return -1;
-            Marshal.WriteByte(buffer, (byte)((bool)value ? 1 : 0));
-            return 1;
-        }
-
-        if (type == typeof(char))
-        {
-            if (size < 2) return -1;
-            Marshal.WriteInt16(buffer, (short)(char)value);
-            return 2;
-        }
-
-        var valueSize = Marshal.SizeOf(type);
-        if (valueSize > size)
-        {
-            return -1;
-        }
-
-        Marshal.StructureToPtr(value, buffer, fDeleteOld: false);
-        return valueSize;
+        return ClrLayout.Write(value, buffer, size);
     }
 
     // ---------------------------------------------------------------------
@@ -395,6 +370,14 @@ public static partial class Bridge
         }
     }
 
+    /// Total payload bytes of an array, using the CLR element layout.
+    /// (Buffer.ByteLength would reject non-primitive elements, but typed
+    /// struct arrays like Vector2f[] are valid here too.)
+    private static long ArrayByteLength(Array array)
+    {
+        return array.LongLength * ClrLayout.SizeOf(array.GetType().GetElementType());
+    }
+
     /// Bulk copy out of a blittable-element array. Returns bytes copied or -1.
     [UnmanagedCallersOnly]
     public static unsafe long ArrayCopyTo(IntPtr arrayHandle, long byteOffset, IntPtr dest, long byteCount)
@@ -404,15 +387,14 @@ public static partial class Bridge
             return -1;
         }
 
-        // Pinning and Buffer.ByteLength both throw for arrays with
-        // non-blittable/non-primitive elements - report instead of crashing.
+        // Pinning throws for arrays whose elements contain references -
+        // report instead of crashing (this export must not throw).
         try
         {
             var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
             try
             {
-                var total = (long)Buffer.ByteLength(array);
-                var count = Math.Min(byteCount, total - byteOffset);
+                var count = Math.Min(byteCount, ArrayByteLength(array) - byteOffset);
                 if (count < 0)
                 {
                     return -1;
@@ -447,7 +429,7 @@ public static partial class Bridge
             var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
             try
             {
-                var total = (long)Buffer.ByteLength(array);
+                var total = ArrayByteLength(array);
                 var count = Math.Min(byteCount, total - byteOffset);
                 if (count < 0)
                 {

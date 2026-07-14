@@ -15,14 +15,27 @@ namespace clr
  * registry, and invokes them via unmanaged function pointers.
  *
  * ABI convention for the managed caller (per parameter type):
- *   - blittable values/structs : passed by value
- *   - strings                  : utf8 const char*, owned by the caller for
- *                                the duration of the call
- *   - objects/wrapped types    : GCHandle (IntPtr), allocated by the caller
- *                                for the duration of the call
- * Return values follow the same rules; strings are returned as interop
- * allocations the managed side frees (Marshal.FreeCoTaskMem), handles are
- * transferred to the caller.
+ *   - primitives                : passed by value (bools widened to int32,
+ *                                 chars widened to uint16 - the default
+ *                                 interop treatment would be 4-byte BOOL /
+ *                                 ANSI char)
+ *   - blittable structs         : passed by value with the CLR layout. The
+ *                                 weaver normalizes bool fields to U1 and
+ *                                 char fields to U2 marshalling, so the
+ *                                 interop layout the runtime produces is
+ *                                 byte-identical to the C++ struct. Passing
+ *                                 by value (not by pointer) keeps managed
+ *                                 wrapper structs compatible with native
+ *                                 scalars of the same size (e.g. a managed
+ *                                 Entity{uint} maps onto entt::entity).
+ *   - strings                   : utf8 const char*, owned by the caller for
+ *                                 the duration of the call
+ *   - objects/wrapped types     : GCHandle (IntPtr), allocated by the caller
+ *                                 for the duration of the call
+ * Return values follow the same rules (structs return by value per the
+ * platform ABI). Strings are returned as interop allocations the managed
+ * side frees (Marshal.FreeCoTaskMem), handles are transferred to the
+ * caller.
  *
  * The clr_internal_call() wrapper adapts a typed C++ function into that
  * shape through clr_converter, mirroring monopp's internal_call macro.
@@ -81,17 +94,22 @@ namespace detail
 auto duplicate_handle_for_transfer(const managed_ptr& owned) -> clr_handle;
 
 // Maps a native parameter type to its C ABI representation for icalls.
+// Scalars and structs both travel by value: the managed weaver normalizes
+// bool/char field marshalling (U1/U2) so the runtime's interop copy of a
+// struct is byte-identical to the C++ layout, and by-value passing keeps
+// managed wrapper structs interchangeable with native scalars of the same
+// size (e.g. a managed Entity{uint} maps onto entt::entity).
 template <typename T, typename Managed = typename clr_converter<std::decay_t<T>>::managed_type>
 struct icall_abi
 {
 	using abi_type = Managed;
 
-	static auto from_abi(abi_type value) -> std::decay_t<T>
+	static auto from_abi(const Managed& value) -> std::decay_t<T>
 	{
 		return clr_converter<std::decay_t<T>>::from_mono(value);
 	}
 
-	static auto to_abi(const std::decay_t<T>& value) -> abi_type
+	static auto to_abi(const std::decay_t<T>& value) -> Managed
 	{
 		return clr_converter<std::decay_t<T>>::to_mono(value);
 	}
@@ -116,6 +134,26 @@ struct icall_abi<bool, bool>
 	static auto to_abi(bool value) -> abi_type
 	{
 		return value ? 1 : 0;
+	}
+};
+
+// Chars travel as int32 too. A standalone `char` in an unmanaged calli
+// signature would be interop-marshalled as a 1-byte ANSI char (unlike the
+// 2-byte utf16 CLR char), and a small return type only defines the low
+// bits of the return register - widening sidesteps both.
+template <>
+struct icall_abi<char16_t, char16_t>
+{
+	using abi_type = int32_t;
+
+	static auto from_abi(abi_type value) -> char16_t
+	{
+		return static_cast<char16_t>(value);
+	}
+
+	static auto to_abi(char16_t value) -> abi_type
+	{
+		return static_cast<int32_t>(value);
 	}
 };
 
@@ -179,6 +217,7 @@ struct icall_abi<const std::string&, managed_ptr> : icall_abi<std::string, manag
 template <typename Signature, Signature& func>
 struct clr_internal_call_wrapper;
 
+// Returns travel by value (scalars widened, structs per the platform ABI).
 template <typename R, typename... Args, R (&func)(Args...)>
 struct clr_internal_call_wrapper<R(Args...), func>
 {

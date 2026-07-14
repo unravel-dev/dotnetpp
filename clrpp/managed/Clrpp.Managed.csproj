@@ -19,7 +19,14 @@
     <!-- NuGet dependencies (Mono.Cecil) must land next to the bridge dll. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
-
+  <Target Name="PrintCompilerInfo" BeforeTargets="CoreCompile">
+    <Message Importance="high"
+            Text="TargetFramework=$(TargetFramework)" />
+    <Message Importance="high"
+            Text="NETCoreSdkVersion=$(NETCoreSdkVersion)" />
+    <Message Importance="high"
+            Text="LangVersion=$(LangVersion)" />
+  </Target>
   <ItemGroup>
     <!-- Icall IL weaving as a compile step (see Weaver.cs). Standalone IL
          library, no dependency on the mono runtime. -->
