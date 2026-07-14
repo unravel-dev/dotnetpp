@@ -28,7 +28,7 @@ struct compiler_paths
 	/// Use assembly_dir to point at an explicit bridge location instead.
 	std::string managed_dir = managed_runtime_dir();
 
-	/// Target .NET version as major.minor (e.g. "10.0"). Written into the
+	/// Target .NET version as major.minor (e.g. "9.0"). Written into the
 	/// fallback runtimeconfig and retrievable via get_dotnet_version() so
 	/// tooling (csproj generation, deploys) stays consistent. Note: the
 	/// actual runtime loaded is still governed by the bridge runtimeconfig
@@ -48,7 +48,7 @@ auto init(const compiler_paths& paths = {}, const debugging_config& debugging = 
 auto get_core_assembly_path() -> std::string;
 void shutdown();
 
-/// Target .NET version (major.minor, e.g. "10.0") configured at init.
+/// Target .NET version (major.minor, e.g. "9.0") configured at init.
 auto get_dotnet_version() -> const std::string&;
 
 struct compiler_params

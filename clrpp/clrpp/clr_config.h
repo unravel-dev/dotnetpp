@@ -27,7 +27,7 @@ inline auto managed_runtime_dir() -> const char*
 /// via compiler_paths::dotnet_version.
 inline auto default_dotnet_version() -> const char*
 {
-	return "10.0";
+	return "9.0";
 }
 
 } // namespace clr

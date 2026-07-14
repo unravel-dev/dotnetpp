@@ -160,7 +160,7 @@ struct exports
 // Runtime lifecycle, used by clr::init / clr::shutdown. managed_dir is the
 // bridge subfolder name probed next to assembly_dir/exe/cwd; empty means the
 // compile-time default (CLRPP_MANAGED_DIR). dotnet_version (major.minor,
-// e.g. "10.0") is used for the fallback runtimeconfig and exposed to tooling;
+// e.g. "9.0") is used for the fallback runtimeconfig and exposed to tooling;
 // empty means the compile-time default.
 auto initialize(const std::string& assembly_dir,
 				const std::string& dotnet_root_override,
