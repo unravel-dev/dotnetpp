@@ -109,7 +109,7 @@ public static partial class Bridge
             (IntPtr)(delegate* unmanaged<IntPtr, long, IntPtr, long, long>)&ArrayCopyFrom,
 
             // appended
-            (IntPtr)(delegate* unmanaged<int, void>)&SetInternalCallWeaving,
+            (IntPtr)(delegate* unmanaged<IntPtr, int>)&WeaveAssembly,
             (IntPtr)(delegate* unmanaged<IntPtr, IntPtr>)&InternHandle,
             (IntPtr)(delegate* unmanaged<int>)&IsDebuggerAttached,
         };

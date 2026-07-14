@@ -21,8 +21,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Optional icall IL weaving (see Weaver.cs). Standalone IL library,
-         no dependency on the mono runtime. -->
+    <!-- Icall IL weaving as a compile step (see Weaver.cs). Standalone IL
+         library, no dependency on the mono runtime. -->
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <!-- Optional leak diagnostics (see Bridge.LeakAnalysis.cs). ClrMD lets us
          snapshot our own process and walk the real GC handle table / heap /

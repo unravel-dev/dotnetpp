@@ -1,4 +1,5 @@
 #include "clr_internal_call.h"
+#include "clr_logger.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -27,26 +28,18 @@ auto get_registry_mutex() -> std::mutex&
 	return m;
 }
 
-auto weaving_flag() -> bool&
-{
-	static bool enabled = true;
-	return enabled;
-}
-
 } // namespace
 
-void set_internal_call_weaving(bool enabled)
+auto weave_assembly(const std::string& assembly_path) -> bool
 {
-	weaving_flag() = enabled;
-	if(bridge_alive())
+	if(!bridge_alive())
 	{
-		bridge().set_internal_call_weaving(enabled ? 1 : 0);
+		log_message("clrpp: weave_assembly requires an initialized runtime (" + assembly_path + ")",
+					"error");
+		return false;
 	}
-}
 
-auto get_internal_call_weaving() -> bool
-{
-	return weaving_flag();
+	return bridge().weave_assembly(assembly_path.c_str()) >= 0;
 }
 
 void add_internal_call(const std::string& name, void* func)

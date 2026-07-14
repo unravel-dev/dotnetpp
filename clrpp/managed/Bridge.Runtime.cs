@@ -120,26 +120,6 @@ internal sealed class ClrppLoadContext : AssemblyLoadContext
         var pdbPath = Path.ChangeExtension(fullPath, ".pdb");
         var pdbBytes = File.Exists(pdbPath) ? File.ReadAllBytes(pdbPath) : null;
 
-        // Optionally rewrite mono-style [InternalCall] extern methods with
-        // real bodies (see Weaver.cs). In-memory only; disk stays untouched.
-        if (IcallWeaver.Enabled)
-        {
-            try
-            {
-                IcallWeaver.Weave(ref assemblyBytes, ref pdbBytes);
-            }
-            catch (FileNotFoundException ex) when (ex.FileName != null && ex.FileName.Contains("Mono.Cecil"))
-            {
-                // Cecil is not deployed - the feature is optional, turn it off.
-                IcallWeaver.Enabled = false;
-                Bridge.Log("icall weaving disabled: Mono.Cecil.dll not found next to the bridge", "warning");
-            }
-            catch (Exception ex)
-            {
-                Bridge.Log($"icall weaving failed for {Path.GetFileName(fullPath)}: {ex.Message}", "warning");
-            }
-        }
-
         using var assemblyStream = new MemoryStream(assemblyBytes);
 
         Assembly assembly;
@@ -154,6 +134,7 @@ internal sealed class ClrppLoadContext : AssemblyLoadContext
         }
 
         RegisterShared(assembly);
+        Bridge.PreBindWovenIcalls(assembly);
         return assembly;
     }
 }
@@ -203,6 +184,27 @@ public static partial class Bridge
     // ---------------------------------------------------------------------
     // Assemblies
     // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Pre-binds internal calls in an assembly woven at compile time (see
+    /// Weaver.cs): the weaver emits a Clrpp.Woven.IcallBinder.BindAll()
+    /// method that resolves every woven icall already registered natively.
+    /// Icalls registered later still bind lazily on first call, so this is
+    /// purely opportunistic - failures never surface here.
+    /// </summary>
+    internal static void PreBindWovenIcalls(Assembly assembly)
+    {
+        try
+        {
+            var binder = assembly.GetType("Clrpp.Woven.IcallBinder", throwOnError: false);
+            binder?.GetMethod("BindAll", BindingFlags.Public | BindingFlags.Static)
+                  ?.Invoke(null, null);
+        }
+        catch (Exception ex)
+        {
+            Log($"icall pre-bind failed for {assembly.GetName().Name}: {ex.Message}", "warning");
+        }
+    }
 
     [UnmanagedCallersOnly]
     public static unsafe IntPtr AssemblyLoad(IntPtr domainHandle, IntPtr pathUtf8, NativeExceptionInfo* exInfo)

@@ -533,7 +533,6 @@ auto initialize(const std::string& assembly_dir,
 	s.table.set_log_callback(reinterpret_cast<void*>(&native_log_callback));
 	s.table.internal_calls_install(reinterpret_cast<void*>(&native_icall_resolver),
 								   reinterpret_cast<void*>(&native_pending_exception_query));
-	s.table.set_internal_call_weaving(get_internal_call_weaving() ? 1 : 0);
 
 	log_message("clrpp: runtime initialized (bridge: " + s.managed_assembly_path + ")", "trace");
 	return true;

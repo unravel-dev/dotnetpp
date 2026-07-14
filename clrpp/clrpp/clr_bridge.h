@@ -152,7 +152,10 @@ struct exports
 	int64_t(CLRPP_CALLTYPE* array_copy_from)(clr_handle, int64_t, const void*, int64_t);
 
 	// appended
-	void(CLRPP_CALLTYPE* set_internal_call_weaving)(int32_t);
+	/// Weaves mono-style [InternalCall] externs in the assembly file at the
+	/// given path (rewrites dll/pdb on disk). 1 = woven, 0 = nothing to do,
+	/// -1 = error (logged managed-side).
+	int32_t(CLRPP_CALLTYPE* weave_assembly)(const char*);
 	clr_handle(CLRPP_CALLTYPE* intern_handle)(clr_handle);
 	int32_t(CLRPP_CALLTYPE* is_debugger_attached)();
 };

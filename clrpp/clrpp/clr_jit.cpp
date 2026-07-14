@@ -1,6 +1,7 @@
 #include "clr_jit.h"
 #include "clr_bridge.h"
 #include "clr_exception.h"
+#include "clr_internal_call.h"
 #include "clr_logger.h"
 #include "clr_path_utils.h"
 
@@ -482,6 +483,14 @@ auto compile(const compiler_params& params) -> bool
 	std::cout << command << std::endl;
 	auto result = std::system(command.c_str()) == 0;
 	std::remove(rsp_file.c_str());
+
+	if(result)
+	{
+		// Part of compilation on this backend: rewrite mono-style
+		// [InternalCall] externs with real bodies (see clr_internal_call.h).
+		result = weave_assembly(params.output_name);
+	}
+
 	return result;
 }
 

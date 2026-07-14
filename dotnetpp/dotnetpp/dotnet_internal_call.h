@@ -12,13 +12,9 @@ namespace dotnet
 using mono::add_internal_call;
 using mono::internal_call_registry;
 
-/// Icall IL weaving is a coreclr-only concept (mono handles
-/// [MethodImpl(InternalCall)] natively); no-op on this backend.
-inline void set_internal_call_weaving(bool)
-{
-}
-
-inline auto get_internal_call_weaving() -> bool
+/// Icall IL weaving is a coreclr-only compile step (mono handles
+/// [MethodImpl(InternalCall)] natively); successful no-op on this backend.
+inline auto weave_assembly(const std::string&) -> bool
 {
 	return true;
 }
@@ -39,9 +35,8 @@ namespace dotnet
 {
 
 using clr::add_internal_call;
-using clr::get_internal_call_weaving;
 using clr::internal_call_registry;
-using clr::set_internal_call_weaving;
+using clr::weave_assembly;
 
 } // namespace dotnet
 

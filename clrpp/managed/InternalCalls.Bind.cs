@@ -49,30 +49,6 @@ public static partial class InternalCalls
         return BindPointer(Get(name), name, delegateType);
     }
 
-    /// <summary>
-    /// Binding entry point used by IL woven from mono-style
-    /// [MethodImpl(MethodImplOptions.InternalCall)] extern methods (see
-    /// Weaver.cs). Follows mono's lookup order: the full signature name
-    /// first, then the bare "Type::Method" name.
-    /// </summary>
-    public static Delegate BindWoven(string primaryName, string fallbackName, Type delegateType)
-    {
-        var fn = TryGet(primaryName);
-        var name = primaryName;
-        if (fn == IntPtr.Zero)
-        {
-            fn = TryGet(fallbackName);
-            name = fallbackName;
-        }
-
-        if (fn == IntPtr.Zero)
-        {
-            throw new MissingMethodException($"Internal call not registered: {primaryName}");
-        }
-
-        return BindPointer(fn, name, delegateType);
-    }
-
     private static Delegate BindPointer(IntPtr fn, string name, Type delegateType)
     {
         var invoke = delegateType.GetMethod("Invoke")
@@ -145,10 +121,15 @@ public static partial class InternalCalls
             }
             else if (t.IsByRef)
             {
-                // By-ref value type: the managed reference is already a
-                // pointer to the struct - pass it through as native int,
-                // matching mono's icall ABI for out/ref parameters.
+                // By-ref value type: travels as a raw pointer to the struct,
+                // matching mono's icall ABI for out/ref parameters. Pinned
+                // for the duration of the call - the referent may live on
+                // the GC heap (field, array element) and must not move while
+                // native code holds the pointer.
                 nativeParamTypes[i] = typeof(IntPtr);
+                marshalled[i] = il.DeclareLocal(t, pinned: true);
+                il.Emit(OpCodes.Ldarg, (short)i);
+                il.Emit(OpCodes.Stloc, marshalled[i]);
             }
             else if (t == typeof(bool))
             {
@@ -175,14 +156,14 @@ public static partial class InternalCalls
         // Push the arguments and the target pointer, then raw-call.
         for (int i = 0; i < paramTypes.Length; i++)
         {
-            if (marshalled[i] != null)
+            if (paramTypes[i].IsByRef)
             {
                 il.Emit(OpCodes.Ldloc, marshalled[i]);
-            }
-            else if (paramTypes[i].IsByRef)
-            {
-                il.Emit(OpCodes.Ldarg, (short)i);
                 il.Emit(OpCodes.Conv_I);
+            }
+            else if (marshalled[i] != null)
+            {
+                il.Emit(OpCodes.Ldloc, marshalled[i]);
             }
             else
             {
@@ -210,7 +191,7 @@ public static partial class InternalCalls
 
         for (int i = 0; i < paramTypes.Length; i++)
         {
-            if (marshalled[i] != null)
+            if (release[i] != null)
             {
                 il.Emit(OpCodes.Ldloc, marshalled[i]);
                 il.Emit(OpCodes.Call, release[i]);

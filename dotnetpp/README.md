@@ -71,15 +71,15 @@ Both backends share the `to_mono`/`from_mono` protocol names (read "mono" as
   The test fixture (`tests/managed/tests.cs`) does not use `Bind`; it relies
   on the IL weaver below so a single mono-style file runs on both backends.
 
-#### Optional: `[InternalCall]` IL weaving on coreclr
+#### `[InternalCall]` IL weaving on coreclr (compile step)
 
-For transition scenarios where the C# side should not change at all, the
-coreclr backend ships an optional IL weaver (Mono.Cecil based, no mono
-runtime involved). Every assembly loaded into a domain is scanned for
-`[MethodImpl(MethodImplOptions.InternalCall)] extern` methods; each one gets
-a generated body that lazily binds the registered native function through
-`InternalCalls.BindWoven` and forwards to it - so mono-style icall
-declarations (including extern constructors) run unchanged:
+So the C# side does not change at all, the coreclr backend weaves mono-style
+icalls as part of compilation (Mono.Cecil based, no mono runtime involved).
+`dotnet::compile` automatically rewrites the produced assembly: every
+`[MethodImpl(MethodImplOptions.InternalCall)] extern` method gets a real
+body that binds the registered native function and calls it through a
+statically-typed `calli` - so mono-style icall declarations (including
+extern constructors) compile and run unchanged:
 
 ```csharp
 [MethodImpl(MethodImplOptions.InternalCall)]
@@ -92,15 +92,20 @@ Details:
   (`"Tests.MyObject::ReturnAString(string)"`) first, then the bare name
   (`"Tests.MyObject::ReturnAString"`), matching how registrations are
   written for `mono::add_internal_call`.
-- The rewrite happens in memory at assembly load; files on disk are never
-  modified and binding is lazy (first invocation), so registration order
+- The woven body marshals inline (strings as utf8 allocations, objects as
+  GCHandles, bools widened to int32, by-ref value types as pinned pointers)
+  and contains no runtime code generation, so woven assemblies work on
+  AOT-only platforms.
+- Icalls already registered natively are pre-bound when the assembly loads
+  (a synthetic `Clrpp.Woven.IcallBinder.BindAll()` runs after load); icalls
+  registered later bind lazily on first invocation, so registration order
   requirements are identical to mono.
-- Enabled by default; toggle with `dotnet::set_internal_call_weaving(bool)`
-  (a no-op on the mono backend). Requires `Mono.Cecil.dll` next to
-  `Clrpp.Managed.dll` - when missing, the feature turns itself off with a
-  warning and only explicit `Bind` calls keep working.
+- `dotnet::weave_assembly(path)` runs the same rewrite on an existing dll
+  (rewrites dll/pdb in place; a no-op returning true on the mono backend).
+  Requires `Mono.Cecil.dll` next to `Clrpp.Managed.dll`.
 - Unsupported shapes (generic methods/types, by-ref/pointer parameters,
-  instance icalls on structs, >16 parameters) are skipped with a warning.
+  instance icalls on structs) are skipped with a warning and fail at
+  invocation time, exactly as an unwoven extern would.
 
 ### Domains
 
@@ -116,10 +121,10 @@ Details:
 - **mono**: invokes `mcs`.
 - **coreclr**: invokes Roslyn (`dotnet exec csc.dll`) with a response file
   and implicit framework references from the newest installed
-  `Microsoft.NETCore.App.Ref` pack. Fixtures only need to reference
-  `Clrpp.Managed.dll` when they use `InternalCalls.Bind`/`Get` directly;
-  woven mono-style icalls need no compile time reference (the weaver adds
-  the assembly reference at load time).
+  `Microsoft.NETCore.App.Ref` pack, then weaves mono-style icalls in the
+  output (see above). Fixtures only need to reference `Clrpp.Managed.dll`
+  when they use `InternalCalls.Bind`/`Get` directly; woven mono-style icalls
+  need no compile time reference (the weaver adds the assembly reference).
 
 ### Test suite composition
 

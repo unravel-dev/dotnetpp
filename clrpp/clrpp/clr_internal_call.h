@@ -26,6 +26,12 @@ namespace clr
  *
  * The clr_internal_call() wrapper adapts a typed C++ function into that
  * shape through clr_converter, mirroring monopp's internal_call macro.
+ *
+ * Threading note: internal calls reachable from managed finalizers run on
+ * the finalizer thread. Do not take locks there that any thread may hold
+ * while blocking on the GC (e.g. around domain_unload, which runs
+ * GC.WaitForPendingFinalizers) - that is a deadlock. Also never store the
+ * `this` GCHandle of a finalizing object beyond the call.
  */
 
 void add_internal_call(const std::string& name, void* func);
@@ -34,17 +40,21 @@ void add_internal_call(const std::string& name, void* func);
 auto find_internal_call(const std::string& name) -> void*;
 
 /*
- * Optional IL weaving of mono-style internal calls (enabled by default).
+ * IL weaving of mono-style internal calls, as a compile step.
  *
- * When enabled, assemblies loaded into a domain are scanned for
- * [MethodImpl(MethodImplOptions.InternalCall)] extern methods and each gets
- * a generated body that lazily binds the registered native function - so C#
- * written for the mono backend runs on coreclr without changes. Requires
- * Mono.Cecil.dll next to Clrpp.Managed.dll; when it is missing the feature
- * turns itself off. Can be toggled any time (affects subsequent loads).
+ * clr::compile automatically rewrites the produced assembly: every
+ * [MethodImpl(MethodImplOptions.InternalCall)] extern method gets a real
+ * body that binds the registered native function and performs the call via
+ * a statically-typed calli (no runtime code generation - the woven output
+ * is AOT-compatible). C# written for the mono backend therefore compiles
+ * and runs on coreclr without changes.
+ *
+ * weave_assembly can also be called directly on an existing dll (rewrites
+ * dll/pdb in place). Requires Mono.Cecil.dll next to Clrpp.Managed.dll.
+ * Returns false on error; an assembly without [InternalCall] externs is a
+ * successful no-op.
  */
-void set_internal_call_weaving(bool enabled);
-auto get_internal_call_weaving() -> bool;
+auto weave_assembly(const std::string& assembly_path) -> bool;
 
 /// Allocate an interop string the managed side will free (CoTaskMem on
 /// Windows, malloc elsewhere - matches Marshal.FreeCoTaskMem).

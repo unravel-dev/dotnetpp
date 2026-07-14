@@ -330,7 +330,15 @@ public static partial class Bridge
             return IntPtr.Zero;
         }
 
-        return Intern(typeof(List<>).MakeGenericType(elementType));
+        try
+        {
+            return Intern(typeof(List<>).MakeGenericType(elementType));
+        }
+        catch (Exception ex)
+        {
+            Log($"TypeGetListType failed for {elementType}: {ex.Message}", "error");
+            return IntPtr.Zero;
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -597,6 +605,22 @@ public static partial class Bridge
         return properties.Length;
     }
 
+    /// Attribute instantiation runs user attribute constructors and resolves
+    /// attribute types - both can throw, which must not escape an
+    /// UnmanagedCallersOnly export (process fail-fast).
+    private static object[] SafeGetCustomAttributes(MemberInfo member, bool inherit)
+    {
+        try
+        {
+            return member.GetCustomAttributes(inherit);
+        }
+        catch (Exception ex)
+        {
+            Log($"GetCustomAttributes failed for {member}: {ex.Message}", "error");
+            return Array.Empty<object>();
+        }
+    }
+
     /// Attribute instances on a type (as new object handles).
     [UnmanagedCallersOnly]
     public static unsafe int TypeGetAttributes(IntPtr typeHandle, int includeBase, IntPtr* buffer, int capacity)
@@ -607,7 +631,7 @@ public static partial class Bridge
             return 0;
         }
 
-        var attrs = type.GetCustomAttributes(includeBase != 0).ToArray();
+        var attrs = SafeGetCustomAttributes(type, includeBase != 0);
         if (buffer != null)
         {
             var count = Math.Min(capacity, attrs.Length);
@@ -722,7 +746,7 @@ public static partial class Bridge
             return 0;
         }
 
-        var attrs = method.GetCustomAttributes(false).Select(a => a.GetType()).ToArray();
+        var attrs = SafeGetCustomAttributes(method, false).Select(a => a.GetType()).ToArray();
         if (buffer != null)
         {
             var count = Math.Min(capacity, attrs.Length);
@@ -805,7 +829,7 @@ public static partial class Bridge
             return 0;
         }
 
-        var attrs = field.GetCustomAttributes(false).ToArray();
+        var attrs = SafeGetCustomAttributes(field, false);
         if (buffer != null)
         {
             var count = Math.Min(capacity, attrs.Length);
@@ -900,7 +924,7 @@ public static partial class Bridge
             return 0;
         }
 
-        var attrs = property.GetCustomAttributes(false).ToArray();
+        var attrs = SafeGetCustomAttributes(property, false);
         if (buffer != null)
         {
             var count = Math.Min(capacity, attrs.Length);

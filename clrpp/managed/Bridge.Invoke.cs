@@ -51,9 +51,19 @@ public static partial class Bridge
             return IntPtr.Zero;
         }
 
-        var variant = new NativeVariant { Kind = NativeVariant.KindBlob, Data = data, Size = size };
-        var obj = VariantToObject(variant, type);
-        return NewObjectHandle(obj);
+        // Marshal.PtrToStructure throws for non-marshalable types; that must
+        // not escape an UnmanagedCallersOnly export (process fail-fast).
+        try
+        {
+            var variant = new NativeVariant { Kind = NativeVariant.KindBlob, Data = data, Size = size };
+            var obj = VariantToObject(variant, type);
+            return NewObjectHandle(obj);
+        }
+        catch (Exception ex)
+        {
+            Log($"ObjectBox failed for {type}: {ex.Message}", "error");
+            return IntPtr.Zero;
+        }
     }
 
     /// Unbox an object's value into a native buffer. Returns bytes written or -1.
@@ -66,7 +76,15 @@ public static partial class Bridge
             return -1;
         }
 
-        return WriteValue(obj, buffer, size);
+        try
+        {
+            return WriteValue(obj, buffer, size);
+        }
+        catch (Exception ex)
+        {
+            Log($"ObjectUnbox failed for {obj.GetType()}: {ex.Message}", "error");
+            return -1;
+        }
     }
 
     internal static int WriteValue(object value, IntPtr buffer, int size)
@@ -319,8 +337,16 @@ public static partial class Bridge
             return IntPtr.Zero;
         }
 
-        var array = Array.CreateInstance(elementType, length);
-        return NewObjectHandle(array);
+        try
+        {
+            var array = Array.CreateInstance(elementType, length);
+            return NewObjectHandle(array);
+        }
+        catch (Exception ex)
+        {
+            Log($"ArrayCreate failed for {elementType}[{length}]: {ex.Message}", "error");
+            return IntPtr.Zero;
+        }
     }
 
     [UnmanagedCallersOnly]
@@ -373,27 +399,37 @@ public static partial class Bridge
     [UnmanagedCallersOnly]
     public static unsafe long ArrayCopyTo(IntPtr arrayHandle, long byteOffset, IntPtr dest, long byteCount)
     {
-        if (Target(arrayHandle) is not Array array || dest == IntPtr.Zero)
+        if (Target(arrayHandle) is not Array array || dest == IntPtr.Zero || byteOffset < 0)
         {
             return -1;
         }
 
-        var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
+        // Pinning and Buffer.ByteLength both throw for arrays with
+        // non-blittable/non-primitive elements - report instead of crashing.
         try
         {
-            var total = (long)Buffer.ByteLength(array);
-            var count = Math.Min(byteCount, total - byteOffset);
-            if (count < 0)
+            var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
+            try
             {
-                return -1;
-            }
+                var total = (long)Buffer.ByteLength(array);
+                var count = Math.Min(byteCount, total - byteOffset);
+                if (count < 0)
+                {
+                    return -1;
+                }
 
-            Buffer.MemoryCopy((byte*)pin.AddrOfPinnedObject() + byteOffset, (void*)dest, byteCount, count);
-            return count;
+                Buffer.MemoryCopy((byte*)pin.AddrOfPinnedObject() + byteOffset, (void*)dest, byteCount, count);
+                return count;
+            }
+            finally
+            {
+                pin.Free();
+            }
         }
-        finally
+        catch (Exception ex)
         {
-            pin.Free();
+            Log($"ArrayCopyTo failed for {array.GetType()}: {ex.Message}", "error");
+            return -1;
         }
     }
 
@@ -401,27 +437,35 @@ public static partial class Bridge
     [UnmanagedCallersOnly]
     public static unsafe long ArrayCopyFrom(IntPtr arrayHandle, long byteOffset, IntPtr src, long byteCount)
     {
-        if (Target(arrayHandle) is not Array array || src == IntPtr.Zero)
+        if (Target(arrayHandle) is not Array array || src == IntPtr.Zero || byteOffset < 0)
         {
             return -1;
         }
 
-        var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
         try
         {
-            var total = (long)Buffer.ByteLength(array);
-            var count = Math.Min(byteCount, total - byteOffset);
-            if (count < 0)
+            var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
+            try
             {
-                return -1;
-            }
+                var total = (long)Buffer.ByteLength(array);
+                var count = Math.Min(byteCount, total - byteOffset);
+                if (count < 0)
+                {
+                    return -1;
+                }
 
-            Buffer.MemoryCopy((void*)src, (byte*)pin.AddrOfPinnedObject() + byteOffset, total - byteOffset, count);
-            return count;
+                Buffer.MemoryCopy((void*)src, (byte*)pin.AddrOfPinnedObject() + byteOffset, total - byteOffset, count);
+                return count;
+            }
+            finally
+            {
+                pin.Free();
+            }
         }
-        finally
+        catch (Exception ex)
         {
-            pin.Free();
+            Log($"ArrayCopyFrom failed for {array.GetType()}: {ex.Message}", "error");
+            return -1;
         }
     }
 }

@@ -107,7 +107,19 @@ public static partial class Bridge
             return null;
         }
 
-        return GCHandle.FromIntPtr(handle).Target;
+        // A stale/freed handle is a native-side bug, but it must degrade to
+        // a diagnosable "invalid handle" error instead of an uncatchable
+        // InvalidOperationException escaping an UnmanagedCallersOnly export
+        // (which would fail-fast the whole process).
+        try
+        {
+            return GCHandle.FromIntPtr(handle).Target;
+        }
+        catch (InvalidOperationException)
+        {
+            Log($"invalid/freed GCHandle passed from native code: 0x{handle:X}", "error");
+            return null;
+        }
     }
 
     internal static T Target<T>(IntPtr handle) where T : class
@@ -241,7 +253,14 @@ public static partial class Bridge
             return;
         }
 
-        GCHandle.FromIntPtr(handle).Free();
+        try
+        {
+            GCHandle.FromIntPtr(handle).Free();
+        }
+        catch (InvalidOperationException)
+        {
+            Log($"FreeHandle: invalid/already-freed GCHandle: 0x{handle:X}", "error");
+        }
     }
 
     [UnmanagedCallersOnly]
@@ -258,8 +277,8 @@ public static partial class Bridge
             return handle;
         }
 
-        var target = GCHandle.FromIntPtr(handle).Target;
-        return GCHandle.ToIntPtr(GCHandle.Alloc(target));
+        var target = Target(handle);
+        return target != null ? GCHandle.ToIntPtr(GCHandle.Alloc(target)) : IntPtr.Zero;
     }
 
     /// <summary>
@@ -281,7 +300,7 @@ public static partial class Bridge
             return handle;
         }
 
-        return Intern(GCHandle.FromIntPtr(handle).Target);
+        return Intern(Target(handle));
     }
 
     internal static bool IsInterned(IntPtr handle)

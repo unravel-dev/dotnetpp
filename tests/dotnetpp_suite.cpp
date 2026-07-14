@@ -11,9 +11,8 @@
 
 /*
  * A single managed fixture serves both backends: mono resolves
- * [MethodImpl(InternalCall)] natively, coreclr weaves the same externs at
- * load time (IL weaving is enabled by default and requires no Clrpp.*
- * references in the fixture).
+ * [MethodImpl(InternalCall)] natively, coreclr weaves the same externs as
+ * part of dotnet::compile (no Clrpp.* references needed in the fixture).
  */
 #define DOTNETPP_TESTS_FIXTURE "managed/tests.cs"
 

@@ -86,6 +86,31 @@ public static unsafe partial class InternalCalls
     }
 
     /// <summary>
+    /// Resolve following mono's icall lookup order: the full signature name
+    /// ("Ns.Type::Method(single,string)") first, then the bare
+    /// "Ns.Type::Method". Used by IL woven from mono-style
+    /// [MethodImpl(MethodImplOptions.InternalCall)] extern methods (see
+    /// Weaver.cs). Throws MissingMethodException when neither is registered.
+    /// </summary>
+    public static IntPtr GetPtr(string primaryName, string fallbackName)
+    {
+        var fn = TryGetPtr(primaryName, fallbackName);
+        if (fn == IntPtr.Zero)
+        {
+            throw new MissingMethodException($"Internal call not registered: {primaryName}");
+        }
+
+        return fn;
+    }
+
+    /// <summary>Non-throwing variant of GetPtr (used by load-time pre-binding).</summary>
+    public static IntPtr TryGetPtr(string primaryName, string fallbackName)
+    {
+        var fn = TryGet(primaryName);
+        return fn != IntPtr.Zero ? fn : TryGet(fallbackName);
+    }
+
+    /// <summary>
     /// Throws the exception raised by the native side via clr::raise_exception
     /// during the last internal call on this thread, if any. CoreCLR cannot
     /// throw managed exceptions across the unmanaged boundary, so wrappers
