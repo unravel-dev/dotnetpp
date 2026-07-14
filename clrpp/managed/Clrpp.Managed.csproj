@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <!-- Driven by CMake (CLRPP_DOTNET_VERSION) via -p:ClrppDotnetVersion;
+         the value here is the fallback for standalone builds. -->
+    <ClrppDotnetVersion Condition="'$(ClrppDotnetVersion)' == ''">9.0</ClrppDotnetVersion>
+    <TargetFramework>net$(ClrppDotnetVersion)</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

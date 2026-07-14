@@ -12,6 +12,10 @@
 #define CLRPP_MANAGED_DIR "clrpp"
 #endif
 
+#ifndef CLRPP_DOTNET_VERSION
+#define CLRPP_DOTNET_VERSION "9.0"
+#endif
+
 namespace clr
 {
 template <typename T>
@@ -23,11 +27,12 @@ inline auto managed_runtime_dir() -> const char*
 }
 
 /// Default .NET version (major.minor) targeted by tooling (default
-/// runtimeconfig, csproj generation, runtime bundling). Overridable per init
-/// via compiler_paths::dotnet_version.
+/// runtimeconfig, csproj generation, runtime bundling). Set from CMake
+/// (CLRPP_DOTNET_VERSION, which also drives the bridge TargetFramework);
+/// overridable per init via compiler_paths::dotnet_version.
 inline auto default_dotnet_version() -> const char*
 {
-	return "9.0";
+	return CLRPP_DOTNET_VERSION;
 }
 
 } // namespace clr

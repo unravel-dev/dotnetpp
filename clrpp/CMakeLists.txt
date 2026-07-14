@@ -3,14 +3,18 @@ set(target_name clrpp)
 set(CLRPP_MANAGED_DIR "clrpp" CACHE STRING
 	"Subdirectory (relative to exe, cwd, or assembly_dir) where Clrpp.Managed runtime files are deployed and probed")
 
+set(CLRPP_DOTNET_VERSION "9.0" CACHE STRING
+	"Target .NET version (major.minor). Drives the bridge TargetFramework (net<ver>), the minimum SDK required to build it, and the native default_dotnet_version()")
+
 file(GLOB libsrc clrpp/*.h clrpp/*.cpp)
 
 add_library(${target_name} ${libsrc})
 
-# PUBLIC so consumers (engine/editor deploy code) see the same folder name.
+# PUBLIC so consumers (engine/editor deploy code) see the same values.
 target_compile_definitions(${target_name}
     PUBLIC
         CLRPP_MANAGED_DIR="${CLRPP_MANAGED_DIR}"
+        CLRPP_DOTNET_VERSION="${CLRPP_DOTNET_VERSION}"
 )
 
 target_include_directories(${target_name}
@@ -44,6 +48,32 @@ if(BUILD_CLRPP_MANAGED)
     find_program(DOTNET_EXECUTABLE dotnet)
 
     if(DOTNET_EXECUTABLE)
+        # `dotnet build` uses the latest installed SDK (or the one pinned by a
+        # global.json); an SDK older than the targeted TFM fails with
+        # NETSDK1045, so catch that at configure time with a clear message.
+        execute_process(
+            COMMAND ${DOTNET_EXECUTABLE} --version
+            OUTPUT_VARIABLE CLRPP_DOTNET_SDK_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+
+        if(NOT CLRPP_DOTNET_SDK_VERSION)
+            message(FATAL_ERROR
+                "clrpp: '${DOTNET_EXECUTABLE} --version' failed - the .NET SDK "
+                "appears broken (runtime-only install?). Install a .NET SDK "
+                ">= ${CLRPP_DOTNET_VERSION} or set BUILD_CLRPP_MANAGED=OFF "
+                "to use a prebuilt Clrpp.Managed.dll.")
+        elseif(CLRPP_DOTNET_SDK_VERSION VERSION_LESS CLRPP_DOTNET_VERSION)
+            message(FATAL_ERROR
+                "clrpp: .NET SDK ${CLRPP_DOTNET_SDK_VERSION} is too old to build "
+                "Clrpp.Managed targeting net${CLRPP_DOTNET_VERSION}. Install a "
+                "newer SDK, lower CLRPP_DOTNET_VERSION, or set "
+                "BUILD_CLRPP_MANAGED=OFF to use a prebuilt Clrpp.Managed.dll.")
+        else()
+            message(STATUS "clrpp: using .NET SDK ${CLRPP_DOTNET_SDK_VERSION}, targeting net${CLRPP_DOTNET_VERSION}")
+        endif()
+
         set(CLRPP_MANAGED_PROJECT ${CMAKE_CURRENT_SOURCE_DIR}/managed/Clrpp.Managed.csproj)
         set(CLRPP_MANAGED_OUTPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/managed/bin/Release)
         set(CLRPP_MANAGED_DLL ${CLRPP_MANAGED_OUTPUT_DIR}/Clrpp.Managed.dll)
@@ -52,9 +82,10 @@ if(BUILD_CLRPP_MANAGED)
 
         add_custom_command(
             OUTPUT ${CLRPP_MANAGED_DLL}
-            COMMAND ${DOTNET_EXECUTABLE} build ${CLRPP_MANAGED_PROJECT} -c Release -o ${CLRPP_MANAGED_OUTPUT_DIR} --nologo -v q
+            COMMAND ${DOTNET_EXECUTABLE} build ${CLRPP_MANAGED_PROJECT} -c Release -o ${CLRPP_MANAGED_OUTPUT_DIR}
+                    -p:ClrppDotnetVersion=${CLRPP_DOTNET_VERSION} --nologo -v q
             DEPENDS ${CLRPP_MANAGED_SOURCES} ${CLRPP_MANAGED_PROJECT}
-            COMMENT "Building Clrpp.Managed bridge assembly"
+            COMMENT "Building Clrpp.Managed bridge assembly (net${CLRPP_DOTNET_VERSION})"
             VERBATIM
         )
 
