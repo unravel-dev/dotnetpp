@@ -117,6 +117,33 @@ Details:
   object references - those cannot cross by raw copy) are skipped with a
   warning and fail at invocation time, exactly as an unwoven extern would.
 
+### CoreCLR interpreter preparation (`interpreter_config`)
+
+`clr::init` (and `dotnet::init`) take an optional `interpreter_config` that
+prepares the process for CoreCLR's experimental interpreter - the
+"interpreter + R2R" execution model intended for JIT-restricted platforms
+(iOS). The config maps onto the runtime's environment switches, which must be
+set before the runtime loads:
+
+| mode               | effect                                                        |
+| ------------------ | ------------------------------------------------------------- |
+| `disabled`         | nothing set; JIT/R2R as usual (default)                       |
+| `opt_in`           | `DOTNET_Interpreter=<filter>` (e.g. `MyAssembly!*`)           |
+| `prefer_compiled`  | `DOTNET_InterpMode=1` - interpret all except R2R + corelib    |
+| `interpret_all`    | `DOTNET_InterpMode=2` - interpret all except intrinsics       |
+| `interpreter_only` | `DOTNET_InterpMode=3` - no JIT/R2R fallback at all            |
+
+Any non-disabled mode also sets `DOTNET_TieredCompilation=0` (tiering can
+replace interpreter code behind its back). Values already present in the
+environment are never overridden, so external experiments keep priority.
+
+Shipped release runtimes do not include the interpreter yet
+(`FEATURE_INTERPRETER` is limited to Debug/Checked CoreCLR builds), so the
+switches are inert there. To exercise the interpreter today, point
+`DOTNET_ROOT` at a checked dotnet/runtime build and pass
+`mode::prefer_compiled`. The mono backend accepts the same struct and
+ignores it.
+
 ### Domains
 
 - **mono**: real AppDomains.

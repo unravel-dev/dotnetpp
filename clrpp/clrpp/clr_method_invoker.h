@@ -69,8 +69,11 @@ namespace detail
 template <typename T, typename Managed = typename clr_converter<std::decay_t<T>>::managed_type>
 struct invoke_result
 {
-	// blittable: request raw value bytes
-	using storage_type = std::decay_t<T>;
+	// Blittable: the managed side writes the value's raw bytes, so the
+	// buffer must have the *managed* representation's size/layout - for
+	// converted types (e.g. a packed byte color natively, four floats
+	// managed) it differs from the native one. Convert on extract.
+	using storage_type = Managed;
 
 	static auto prepare(storage_type& storage) -> clr_variant
 	{
@@ -87,7 +90,7 @@ struct invoke_result
 		{
 			return {};
 		}
-		return storage;
+		return clr_converter<std::decay_t<T>>::from_mono(storage);
 	}
 };
 

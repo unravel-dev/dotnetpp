@@ -248,5 +248,15 @@ auto get_env(const char* name) -> std::string
 #endif
 }
 
+void set_env(const char* name, const std::string& value)
+{
+#ifdef _WIN32
+	SetEnvironmentVariableA(name, value.c_str());
+	_putenv_s(name, value.c_str());
+#else
+	setenv(name, value.c_str(), 1 /*overwrite*/);
+#endif
+}
+
 } // namespace path_utils
 } // namespace clr

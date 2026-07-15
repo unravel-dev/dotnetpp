@@ -44,7 +44,53 @@ struct debugging_config
 	uint32_t loglevel = 0;
 };
 
-auto init(const compiler_paths& paths = {}, const debugging_config& debugging = {}) -> bool;
+/*
+ * Experimental CoreCLR interpreter configuration (the "interpreter + R2R"
+ * execution model targeted at JIT-restricted platforms such as iOS).
+ *
+ * The interpreter is selected through process environment variables that the
+ * runtime reads during startup, so they must be in place before hostfxr is
+ * loaded; clr::init applies them ahead of runtime initialization. Variables
+ * already present in the environment are never overridden - an externally
+ * set DOTNET_Interpreter / DOTNET_InterpMode always wins, which keeps ad-hoc
+ * experiments (and CI overrides) possible without code changes.
+ *
+ * Note: shipped release runtimes do not yet include the interpreter
+ * (FEATURE_INTERPRETER is currently limited to Debug/Checked CoreCLR
+ * builds), so on such runtimes these switches are silently ignored and
+ * everything runs under the JIT as before. The moment a runtime that ships
+ * the interpreter is used (via DOTNET_ROOT or compiler_paths::config_dir),
+ * the configuration takes effect with no further changes.
+ */
+struct interpreter_config
+{
+	/// Mirrors the runtime's DOTNET_InterpMode values (interpreter_only also
+	/// disables ReadyToRun and hardware intrinsics runtime-side).
+	enum class mode
+	{
+		/// Leave the environment untouched; JIT/R2R as usual.
+		disabled,
+		/// Interpret only the methods matched by `filter` (DOTNET_Interpreter).
+		opt_in,
+		/// InterpMode=1: interpret everything except R2R-compiled code and
+		/// System.Private.CoreLib. This is the iOS shipping model - R2R'd
+		/// assemblies run compiled, everything else is interpreted.
+		prefer_compiled,
+		/// InterpMode=2: interpret everything except intrinsics.
+		interpret_all,
+		/// InterpMode=3: full interpreter-only mode, no JIT/R2R fallback.
+		interpreter_only
+	};
+
+	mode interp_mode = mode::disabled;
+
+	/// Methodset for mode::opt_in, e.g. "MyAssembly!*" (whole assembly),
+	/// "Namespace.Type::Method" or "*" (everything). Ignored in other modes.
+	std::string filter;
+};
+
+auto init(const compiler_paths& paths = {}, const debugging_config& debugging = {},
+		  const interpreter_config& interpreter = {}) -> bool;
 auto get_core_assembly_path() -> std::string;
 void shutdown();
 

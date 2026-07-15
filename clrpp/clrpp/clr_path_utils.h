@@ -30,5 +30,11 @@ auto pick_highest_version_dir(const std::string& base) -> std::string;
 
 auto get_env(const char* name) -> std::string;
 
+/// Set a process environment variable, overwriting any existing value. On
+/// Windows both the Win32 and CRT environment copies are updated so the value
+/// is visible to GetEnvironmentVariable (which coreclr's config reader uses)
+/// as well as getenv.
+void set_env(const char* name, const std::string& value);
+
 } // namespace path_utils
 } // namespace clr

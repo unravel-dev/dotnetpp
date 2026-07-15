@@ -287,7 +287,69 @@ auto get_common_executable_paths() -> const std::vector<std::string>&
 	return get_common_library_paths();
 }
 
-auto init(const compiler_paths& paths, const debugging_config& debugging) -> bool
+namespace
+{
+/*
+ * Translate interpreter_config into the runtime's environment switches.
+ * Must run before hostfxr/coreclr are loaded - the runtime samples these
+ * variables once during startup. Pre-existing environment values are left
+ * alone so external overrides (shell, CI, debugging sessions) keep priority.
+ */
+void apply_interpreter_config(const interpreter_config& interp)
+{
+	if(interp.interp_mode == interpreter_config::mode::disabled)
+	{
+		return;
+	}
+
+	auto set_if_unset = [](const char* name, const std::string& value)
+	{
+		if(!path_utils::get_env(name).empty())
+		{
+			log_message(std::string("clrpp: ") + name + " already set in environment; keeping it", "info");
+			return;
+		}
+		path_utils::set_env(name, value);
+		log_message(std::string("clrpp: ") + name + "=" + value, "info");
+	};
+
+	switch(interp.interp_mode)
+	{
+		case interpreter_config::mode::opt_in:
+			if(interp.filter.empty())
+			{
+				log_message("clrpp: interpreter mode::opt_in requires a filter; ignoring", "warning");
+				return;
+			}
+			set_if_unset("DOTNET_Interpreter", interp.filter);
+			break;
+		case interpreter_config::mode::prefer_compiled:
+			set_if_unset("DOTNET_InterpMode", "1");
+			break;
+		case interpreter_config::mode::interpret_all:
+			set_if_unset("DOTNET_InterpMode", "2");
+			break;
+		case interpreter_config::mode::interpreter_only:
+			set_if_unset("DOTNET_InterpMode", "3");
+			break;
+		default:
+			return;
+	}
+
+	// Tiered compilation can replace interpreter code with jitted code
+	// behind the interpreter's back (dotnet/runtime#118911); newer runtimes
+	// disable it automatically when the interpreter is active, but being
+	// explicit keeps earlier preview builds working too.
+	set_if_unset("DOTNET_TieredCompilation", "0");
+
+	log_message("clrpp: coreclr interpreter requested; runtimes without the interpreter "
+				"(current release builds) ignore these switches and run under the JIT",
+				"info");
+}
+} // namespace
+
+auto init(const compiler_paths& paths, const debugging_config& debugging, const interpreter_config& interpreter)
+	-> bool
 {
 	ANONYMOUS::comp_paths = new compiler_paths(paths);
 
@@ -299,6 +361,8 @@ auto init(const compiler_paths& paths, const debugging_config& debugging) -> boo
 		// netcoredbg); nothing to configure on the embedding side.
 		log_message("clrpp: managed debugging is handled by the coreclr debugger services", "info");
 	}
+
+	apply_interpreter_config(interpreter);
 
 	if(!bridge_detail::initialize(paths.assembly_dir, paths.config_dir, paths.managed_dir, paths.dotnet_version))
 	{
