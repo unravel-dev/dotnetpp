@@ -254,6 +254,8 @@ public static partial class Bridge
         {
             Log($"FreeHandle: invalid/already-freed GCHandle: 0x{handle:X}", "error");
         }
+
+        ArrayPinCache.Release(handle);
     }
 
     [UnmanagedCallersOnly]

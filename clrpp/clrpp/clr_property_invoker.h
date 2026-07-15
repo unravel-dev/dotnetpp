@@ -3,6 +3,8 @@
 
 #include "clr_method_invoker.h"
 
+#include <memory>
+
 namespace clr
 {
 
@@ -40,58 +42,96 @@ private:
 		: clr_property(property)
 	{
 	}
+
+	auto get_invoker() const -> clr_method_invoker<T()>&
+	{
+		if(!get_invoker_)
+		{
+			get_invoker_ = std::make_shared<clr_method_invoker<T()>>(
+				make_method_invoker<T()>(get_get_method()));
+		}
+		return *get_invoker_;
+	}
+
+	auto set_invoker() const -> clr_method_invoker<void(const T&)>&
+	{
+		if(!set_invoker_)
+		{
+			set_invoker_ = std::make_shared<clr_method_invoker<void(const T&)>>(
+				make_method_invoker<void(const T&)>(get_set_method()));
+		}
+		return *set_invoker_;
+	}
+
+	auto get_indexed_invoker() const -> clr_method_invoker<T(int32_t)>&
+	{
+		if(!get_indexed_invoker_)
+		{
+			get_indexed_invoker_ = std::make_shared<clr_method_invoker<T(int32_t)>>(
+				make_method_invoker<T(int32_t)>(get_get_method()));
+		}
+		return *get_indexed_invoker_;
+	}
+
+	auto set_indexed_invoker() const -> clr_method_invoker<void(int32_t, const T&)>&
+	{
+		if(!set_indexed_invoker_)
+		{
+			set_indexed_invoker_ = std::make_shared<clr_method_invoker<void(int32_t, const T&)>>(
+				make_method_invoker<void(int32_t, const T&)>(get_set_method()));
+		}
+		return *set_indexed_invoker_;
+	}
+
+	mutable std::shared_ptr<clr_method_invoker<T()>> get_invoker_;
+	mutable std::shared_ptr<clr_method_invoker<void(const T&)>> set_invoker_;
+	mutable std::shared_ptr<clr_method_invoker<T(int32_t)>> get_indexed_invoker_;
+	mutable std::shared_ptr<clr_method_invoker<void(int32_t, const T&)>> set_indexed_invoker_;
 };
 
 template <typename T>
 void clr_property_invoker<T>::set_value(const T& val) const
 {
-	auto thunk = make_method_invoker<void(const T&)>(get_set_method());
-	thunk(val);
+	set_invoker()(val);
 }
 
 template <typename T>
 void clr_property_invoker<T>::set_value(const clr_object& object, const T& val) const
 {
-	auto thunk = make_method_invoker<void(const T&)>(get_set_method());
-	thunk(object, val);
+	set_invoker()(object, val);
 }
 
 template <typename T>
 auto clr_property_invoker<T>::get_value() const -> T
 {
-	auto thunk = make_method_invoker<T()>(get_get_method());
-	return thunk();
+	return get_invoker()();
 }
 
 template <typename T>
 auto clr_property_invoker<T>::get_value(const clr_object& object) const -> T
 {
-	auto thunk = make_method_invoker<T()>(get_get_method());
-	return thunk(object);
+	return get_invoker()(object);
 }
 
 template <typename T>
 template <typename IndexArg>
 auto clr_property_invoker<T>::get_value_with_args(IndexArg index) const -> T
 {
-	auto thunk = make_method_invoker<T(IndexArg)>(get_get_method());
-	return thunk(index);
+	return get_indexed_invoker()(static_cast<int32_t>(index));
 }
 
 template <typename T>
 template <typename IndexArg>
 auto clr_property_invoker<T>::get_value_with_args(const clr_object& object, IndexArg index) const -> T
 {
-	auto thunk = make_method_invoker<T(IndexArg)>(get_get_method());
-	return thunk(object, index);
+	return get_indexed_invoker()(object, static_cast<int32_t>(index));
 }
 
 template <typename T>
 template <typename IndexArg>
 void clr_property_invoker<T>::set_value_with_args(IndexArg index, const T& val) const
 {
-	auto thunk = make_method_invoker<void(IndexArg, const T&)>(get_set_method());
-	thunk(index, val);
+	set_indexed_invoker()(static_cast<int32_t>(index), val);
 }
 
 template <typename T>
@@ -99,8 +139,7 @@ template <typename IndexArg>
 void clr_property_invoker<T>::set_value_with_args(const clr_object& object, IndexArg index,
 												  const T& val) const
 {
-	auto thunk = make_method_invoker<void(IndexArg, const T&)>(get_set_method());
-	thunk(object, index, val);
+	set_indexed_invoker()(object, static_cast<int32_t>(index), val);
 }
 
 template <typename T>

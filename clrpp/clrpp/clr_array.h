@@ -72,6 +72,85 @@ inline auto byte_element_type() -> clr_type
 	return clr_assembly::get_corlib().get_type("System.Byte");
 }
 
+inline void copy_blittable_bytes(clr_handle array, int64_t byte_offset, void* dest, int64_t byte_count)
+{
+	auto copied = bridge().array_copy_to(array, byte_offset, dest, byte_count);
+	if(copied != byte_count)
+	{
+		throw clr_exception("NATIVE::array bulk read failed (element layout mismatch?)");
+	}
+}
+
+inline void copy_blittable_bytes_from(clr_handle array, int64_t byte_offset, const void* src, int64_t byte_count)
+{
+	auto copied = bridge().array_copy_from(array, byte_offset, src, byte_count);
+	if(copied != byte_count)
+	{
+		throw clr_exception("NATIVE::array bulk write failed (element layout mismatch?)");
+	}
+}
+
+template <typename VectorLike>
+struct has_contiguous_storage : std::false_type
+{
+};
+
+template <typename T, typename Alloc>
+struct has_contiguous_storage<std::vector<T, Alloc>> : std::true_type
+{
+};
+
+template <>
+struct has_contiguous_storage<std::vector<bool>> : std::false_type
+{
+};
+
+template <typename T, typename VectorLike>
+inline auto fill_array_from_vector(clr_array<T>& array, const VectorLike& vec)
+	-> typename std::enable_if<has_contiguous_storage<VectorLike>::value>::type
+{
+	if(!vec.empty())
+	{
+		copy_blittable_bytes_from(array.get_internal_ptr(), 0, vec.data(),
+								  static_cast<int64_t>(vec.size() * sizeof(T)));
+	}
+}
+
+template <typename T, typename VectorLike>
+inline auto fill_array_from_vector(clr_array<T>& array, const VectorLike& vec)
+	-> typename std::enable_if<!has_contiguous_storage<VectorLike>::value>::type
+{
+	for(size_t i = 0; i < vec.size(); ++i)
+	{
+		array.set(i, vec[i]);
+	}
+}
+
+template <typename T, typename VectorLike>
+inline auto read_array_to_vector(const clr_array<T>& array, VectorLike& vec)
+	-> typename std::enable_if<has_contiguous_storage<VectorLike>::value>::type
+{
+	const auto count = array.size();
+	vec.resize(count);
+	if(count > 0)
+	{
+		copy_blittable_bytes(array.get_internal_ptr(), 0, vec.data(),
+							 static_cast<int64_t>(count * sizeof(T)));
+	}
+}
+
+template <typename T, typename VectorLike>
+inline auto read_array_to_vector(const clr_array<T>& array, VectorLike& vec)
+	-> typename std::enable_if<!has_contiguous_storage<VectorLike>::value>::type
+{
+	const auto count = array.size();
+	vec.resize(count);
+	for(size_t i = 0; i < count; ++i)
+	{
+		vec[i] = array.get(i);
+	}
+}
+
 } // namespace detail
 
 template <typename T>
@@ -106,10 +185,7 @@ public:
 	{
 		object_ = create_array(clr_domain::get_current_domain(), vec.size(), {});
 		type_ = clr_type(bridge().object_get_type(object_.get()));
-		for(size_t i = 0; i < vec.size(); ++i)
-		{
-			set(i, vec[i]);
-		}
+		detail::fill_array_from_vector(*this, vec);
 	}
 
 	template <typename VectorLike = std::vector<T>>
@@ -118,10 +194,7 @@ public:
 	{
 		object_ = create_array(clr_domain::get_current_domain(), vec.size(), element_type);
 		type_ = clr_type(bridge().object_get_type(object_.get()));
-		for(size_t i = 0; i < vec.size(); ++i)
-		{
-			set(i, vec[i]);
-		}
+		detail::fill_array_from_vector(*this, vec);
 	}
 
 	auto size() const -> size_t
@@ -136,12 +209,8 @@ public:
 		// or failed copy (layout mismatch, reference-bearing elements) must
 		// not silently yield a zeroed value.
 		T value{};
-		auto copied = bridge().array_copy_to(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
-											 std::addressof(value), static_cast<int64_t>(sizeof(T)));
-		if(copied != static_cast<int64_t>(sizeof(T)))
-		{
-			throw clr_exception("NATIVE::array element read failed (element layout mismatch?)");
-		}
+		detail::copy_blittable_bytes(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
+									 std::addressof(value), static_cast<int64_t>(sizeof(T)));
 		return value;
 	}
 
@@ -154,23 +223,15 @@ public:
 
 	void set(size_t index, const T& value)
 	{
-		auto copied =
-			bridge().array_copy_from(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
-									 std::addressof(value), static_cast<int64_t>(sizeof(T)));
-		if(copied != static_cast<int64_t>(sizeof(T)))
-		{
-			throw clr_exception("NATIVE::array element write failed (element layout mismatch?)");
-		}
+		detail::copy_blittable_bytes_from(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
+										  std::addressof(value), static_cast<int64_t>(sizeof(T)));
 	}
 
 	template <typename VectorLike = std::vector<T>>
 	auto to_vector() const -> VectorLike
 	{
-		VectorLike vec(size());
-		for(size_t i = 0; i < vec.size(); ++i)
-		{
-			vec[i] = get(i);
-		}
+		VectorLike vec;
+		detail::read_array_to_vector(*this, vec);
 		return vec;
 	}
 

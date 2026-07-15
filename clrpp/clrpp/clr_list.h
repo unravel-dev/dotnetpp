@@ -10,10 +10,63 @@
 #include "clr_type_traits.h"
 
 #include <list>
+#include <memory>
 #include <vector>
 
 namespace clr
 {
+
+namespace detail
+{
+
+struct list_base_invokers
+{
+	clr_method_invoker<int()> count;
+	clr_method_invoker<void()> clear;
+	clr_method_invoker<void(int32_t)> remove_at;
+
+	explicit list_base_invokers(const clr_type& type)
+		: count(make_method_invoker<int()>(type.get_method("get_Count", 0), false))
+		, clear(make_method_invoker<void()>(type.get_method("Clear", 0), false))
+		, remove_at(make_method_invoker<void(int32_t)>(type.get_method("RemoveAt", 1), false))
+	{
+	}
+};
+
+template <typename T>
+struct valuetype_list_invokers
+{
+	clr_method_invoker<void(clr_array<T>&)> add_range;
+	clr_method_invoker<void(const T&)> add;
+	clr_method_invoker<T(int32_t)> get_item;
+	clr_method_invoker<void(int32_t, const T&)> set_item;
+
+	explicit valuetype_list_invokers(const clr_type& type)
+		: add_range(make_method_invoker<void(clr_array<T>&)>(type.get_method("AddRange", 1), false))
+		, add(make_method_invoker<void(const T&)>(type, "Add"))
+		, get_item(make_method_invoker<T(int32_t)>(type.get_method("get_Item", 1), false))
+		, set_item(make_method_invoker<void(int32_t, const T&)>(type.get_method("set_Item", 2), false))
+	{
+	}
+};
+
+struct object_list_invokers
+{
+	clr_method_invoker<void(clr_array<clr_object>&)> add_range;
+	clr_method_invoker<void(clr_object)> add;
+	clr_method_invoker<clr_object(int32_t)> get_item;
+	clr_method_invoker<void(int32_t, clr_object)> set_item;
+
+	explicit object_list_invokers(const clr_type& type)
+		: add_range(make_method_invoker<void(clr_array<clr_object>&)>(type.get_method("AddRange", 1), false))
+		, add(make_method_invoker<void(clr_object)>(type.get_method("Add", 1), false))
+		, get_item(make_method_invoker<clr_object(int32_t)>(type.get_method("get_Item", 1), false))
+		, set_item(make_method_invoker<void(int32_t, clr_object)>(type.get_method("set_Item", 2), false))
+	{
+	}
+};
+
+} // namespace detail
 
 class clr_list_base : public clr_object
 {
@@ -30,26 +83,37 @@ public:
 
 	auto size() const -> std::size_t
 	{
-		auto invoker = make_method_invoker<int()>(get_type().get_method("get_Count", 0), false);
-		return static_cast<std::size_t>(invoker(*this));
+		ensure_invokers();
+		return static_cast<std::size_t>((*invokers_).count(*this));
 	}
 
 	void clear()
 	{
-		auto invoker = make_method_invoker<void()>(get_type().get_method("Clear", 0), false);
-		invoker(*this);
+		ensure_invokers();
+		(*invokers_).clear(*this);
 	}
 
 	void remove_at(int32_t index)
 	{
-		auto invoker = make_method_invoker<void(int32_t)>(get_type().get_method("RemoveAt", 1), false);
-		invoker(*this, index);
+		ensure_invokers();
+		(*invokers_).remove_at(*this, index);
 	}
 
 	auto get_element_type() const -> clr_type
 	{
 		return get_type().get_element_type();
 	}
+
+protected:
+	void ensure_invokers() const
+	{
+		if(!invokers_)
+		{
+			invokers_ = std::make_shared<detail::list_base_invokers>(get_type());
+		}
+	}
+
+	mutable std::shared_ptr<detail::list_base_invokers> invokers_;
 };
 
 template <typename T>
@@ -91,46 +155,32 @@ public:
 	clr_list(const VectorLike& vec)
 		: clr_list_base(clr_object{})
 	{
-		auto obj = create_list(clr_domain::get_current_domain(), {});
-		object_ = obj.get_managed_ptr();
-		type_ = obj.get_type();
-		for(auto& item : vec)
-		{
-			add(item);
-		}
+		init_from_vector(vec, {});
 	}
 
 	template <typename VectorLike = std::vector<T>>
 	clr_list(const VectorLike& vec, const clr_type& element_type)
 		: clr_list_base(clr_object{})
 	{
-		auto obj = create_list(clr_domain::get_current_domain(), element_type);
-		object_ = obj.get_managed_ptr();
-		type_ = obj.get_type();
-		for(auto& item : vec)
-		{
-			add(item);
-		}
+		init_from_vector(vec, element_type);
 	}
 
 	void add(const T& value)
 	{
-		auto invoker = make_method_invoker<void(const T&)>(get_type(), "Add");
-		invoker(*this, value);
+		ensure_typed_invokers();
+		(*typed_invokers_).add(*this, value);
 	}
 
 	auto get(std::size_t index) const -> T
 	{
-		int idx = static_cast<int>(index);
-		auto invoker = make_property_invoker<T>(get_type(), "Item");
-		return invoker.get_value_with_args(*this, idx);
+		ensure_typed_invokers();
+		return (*typed_invokers_).get_item(const_cast<clr_list&>(*this), static_cast<int32_t>(index));
 	}
 
 	void set(std::size_t index, const T& value)
 	{
-		int idx = static_cast<int>(index);
-		auto invoker = make_property_invoker<T>(get_type(), "Item");
-		invoker.set_value_with_args(*this, idx, value);
+		ensure_typed_invokers();
+		(*typed_invokers_).set_item(*this, static_cast<int32_t>(index), value);
 	}
 
 	auto to_list() const -> std::list<T>
@@ -154,6 +204,33 @@ public:
 		}
 		return vec;
 	}
+
+private:
+	template <typename VectorLike>
+	void init_from_vector(const VectorLike& vec, const clr_type& element_type)
+	{
+		auto obj = create_list(clr_domain::get_current_domain(), element_type);
+		object_ = obj.get_managed_ptr();
+		type_ = obj.get_type();
+		if(vec.empty())
+		{
+			return;
+		}
+
+		clr_array<T> arr(vec, element_type);
+		ensure_typed_invokers();
+		(*typed_invokers_).add_range(*this, arr);
+	}
+
+	void ensure_typed_invokers() const
+	{
+		if(!typed_invokers_)
+		{
+			typed_invokers_ = std::make_shared<detail::valuetype_list_invokers<T>>(get_type());
+		}
+	}
+
+	mutable std::shared_ptr<detail::valuetype_list_invokers<T>> typed_invokers_;
 };
 
 template <>
@@ -183,10 +260,15 @@ public:
 			object_ = obj.get_managed_ptr();
 			type_ = obj.get_type();
 		}
-		for(auto& item : vec)
+
+		if(vec.empty())
 		{
-			add(item);
+			return;
 		}
+
+		clr_array<clr_object> arr(vec, element_type);
+		ensure_typed_invokers();
+		(*typed_invokers_).add_range(*this, arr);
 	}
 
 	template <typename VectorLike = std::vector<clr_object>>
@@ -211,22 +293,20 @@ public:
 
 	void add(const clr_object& value)
 	{
-		auto invoker = make_method_invoker<void(clr_object)>(get_type().get_method("Add", 1), false);
-		invoker(*this, value);
+		ensure_typed_invokers();
+		(*typed_invokers_).add(*this, value);
 	}
 
 	auto get(std::size_t index) const -> clr_object
 	{
-		auto invoker =
-			make_method_invoker<clr_object(int32_t)>(get_type().get_method("get_Item", 1), false);
-		return invoker(const_cast<clr_list&>(*this), static_cast<int32_t>(index));
+		ensure_typed_invokers();
+		return (*typed_invokers_).get_item(const_cast<clr_list&>(*this), static_cast<int32_t>(index));
 	}
 
 	void set(std::size_t index, const clr_object& value)
 	{
-		auto invoker =
-			make_method_invoker<void(int32_t, clr_object)>(get_type().get_method("set_Item", 2), false);
-		invoker(*this, static_cast<int32_t>(index), value);
+		ensure_typed_invokers();
+		(*typed_invokers_).set_item(*this, static_cast<int32_t>(index), value);
 	}
 
 	template <typename VectorLike = std::vector<clr_object>>
@@ -250,9 +330,19 @@ public:
 	{
 		return {get_element_type(), to_vector<VectorLike>()};
 	}
+
+private:
+	void ensure_typed_invokers() const
+	{
+		if(!typed_invokers_)
+		{
+			typed_invokers_ = std::make_shared<detail::object_list_invokers>(get_type());
+		}
+	}
+
+	mutable std::shared_ptr<detail::object_list_invokers> typed_invokers_;
 };
 
-// clr_converter specializations for clr_list / std::list
 template <typename T>
 struct clr_converter<clr_list<T>>
 {

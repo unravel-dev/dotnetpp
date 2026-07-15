@@ -133,37 +133,44 @@ public static partial class Bridge
     {
         try
         {
-            var method = Target<MethodBase>(methodHandle);
-            if (method == null)
+            var plan = GetMethodPlan(methodHandle);
+            if (plan.Method == null)
             {
                 throw new ArgumentException("Invalid method handle");
             }
 
             var target = Target(targetHandle);
-            var parameters = method.GetParameters();
+            var parameters = plan.Parameters ?? plan.Method.GetParameters();
 
             object[] managedArgs = null;
             if (argc > 0)
             {
-                managedArgs = new object[argc];
+                var rented = RentInvokeArgs(argc);
                 for (int i = 0; i < argc; i++)
                 {
                     var expected = i < parameters.Length ? parameters[i].ParameterType : null;
-                    managedArgs[i] = VariantToObject(in args[i], expected);
+                    rented[i] = VariantToObject(in args[i], expected);
+                }
+
+                if (rented.Length == argc)
+                {
+                    managedArgs = rented;
+                }
+                else
+                {
+                    managedArgs = new object[argc];
+                    Array.Copy(rented, managedArgs, argc);
                 }
             }
 
             object returnValue;
-            if (method is ConstructorInfo ctor && target != null)
+            if (plan.Method is ConstructorInfo ctor && target != null)
             {
-                // Invoking a constructor on an existing instance (mono style ".ctor" call).
                 returnValue = ctor.Invoke(target, managedArgs);
             }
             else
             {
-                // MethodBase.Invoke performs virtual dispatch on the runtime
-                // type of target, matching mono_object_get_virtual_method.
-                returnValue = method.Invoke(target, managedArgs);
+                returnValue = plan.Method.Invoke(target, managedArgs);
             }
 
             WriteResult(returnValue, ref *result);
@@ -260,6 +267,11 @@ public static partial class Bridge
             }
 
             var target = Target(targetHandle);
+            if (TryFieldGetBlittable(field, target, ref *result, exInfo))
+            {
+                return;
+            }
+
             var value = field.GetValue(target);
             WriteResult(value, ref *result);
         }
@@ -282,6 +294,12 @@ public static partial class Bridge
             }
 
             var target = Target(targetHandle);
+            if (value->Kind == NativeVariant.KindBlob &&
+                TryFieldSetBlittable(field, target, in *value, exInfo))
+            {
+                return;
+            }
+
             var managedValue = VariantToObject(in *value, field.FieldType);
 
             if (managedValue != null && !field.FieldType.IsValueType &&
@@ -387,26 +405,17 @@ public static partial class Bridge
             return -1;
         }
 
-        // Pinning throws for arrays whose elements contain references -
-        // report instead of crashing (this export must not throw).
         try
         {
-            var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
-            try
+            var pin = ArrayPinCache.Pin(array, arrayHandle);
+            var count = Math.Min(byteCount, ArrayByteLength(array) - byteOffset);
+            if (count < 0)
             {
-                var count = Math.Min(byteCount, ArrayByteLength(array) - byteOffset);
-                if (count < 0)
-                {
-                    return -1;
-                }
+                return -1;
+            }
 
-                Buffer.MemoryCopy((byte*)pin.AddrOfPinnedObject() + byteOffset, (void*)dest, byteCount, count);
-                return count;
-            }
-            finally
-            {
-                pin.Free();
-            }
+            Buffer.MemoryCopy((byte*)pin.AddrOfPinnedObject() + byteOffset, (void*)dest, byteCount, count);
+            return count;
         }
         catch (Exception ex)
         {
@@ -426,23 +435,16 @@ public static partial class Bridge
 
         try
         {
-            var pin = GCHandle.Alloc(array, GCHandleType.Pinned);
-            try
+            var pin = ArrayPinCache.Pin(array, arrayHandle);
+            var total = ArrayByteLength(array);
+            var count = Math.Min(byteCount, total - byteOffset);
+            if (count < 0)
             {
-                var total = ArrayByteLength(array);
-                var count = Math.Min(byteCount, total - byteOffset);
-                if (count < 0)
-                {
-                    return -1;
-                }
+                return -1;
+            }
 
-                Buffer.MemoryCopy((void*)src, (byte*)pin.AddrOfPinnedObject() + byteOffset, total - byteOffset, count);
-                return count;
-            }
-            finally
-            {
-                pin.Free();
-            }
+            Buffer.MemoryCopy((void*)src, (byte*)pin.AddrOfPinnedObject() + byteOffset, total - byteOffset, count);
+            return count;
         }
         catch (Exception ex)
         {
