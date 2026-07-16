@@ -157,7 +157,12 @@ public static partial class Bridge
 
         if (plan.ConstructorInvoker != null)
         {
-            return plan.ConstructorInvoker.Invoke(managedArgs ?? Array.Empty<object>());
+            if (managedArgs == null || managedArgs.Length == 0)
+            {
+                return plan.ConstructorInvoker.Invoke();
+            }
+
+            return plan.ConstructorInvoker.Invoke(managedArgs.AsSpan());
         }
 
         if (plan.MethodInvoker != null)
