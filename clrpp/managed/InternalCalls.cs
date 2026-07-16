@@ -6,16 +6,14 @@ namespace Clrpp
 {
 
 /// <summary>
-/// Public entry point for user assemblies to bind native internal calls.
+/// Helpers used by woven mono-style internal calls and (optionally) by hand
+/// written unmanaged function-pointer wrappers.
 ///
 /// The native side registers functions with clr::add_internal_call using the
-/// mono style "Full.Type.Name::MethodName(argtypes)" naming.
-///
-/// Preferred usage: Bind (see InternalCalls.Bind.cs) generates all the
-/// marshalling automatically and returns an ordinary delegate:
-///
-///   static readonly Func&lt;object, string, string&gt; ReturnAString =
-///       InternalCalls.Bind&lt;Func&lt;object, string, string&gt;&gt;("Tests.MyObject::ReturnAString");
+/// mono style "Full.Type.Name::MethodName(argtypes)" naming. Prefer declaring
+/// methods as [MethodImpl(MethodImplOptions.InternalCall)] extern and letting
+/// the compile-time weaver (Weaver.cs) emit the marshalling body - that path
+/// needs no runtime code generation and works on interpreter / AOT hosts.
 ///
 /// Low level usage: fetch the raw pointer once and invoke it through an
 /// unmanaged function pointer, marshalling by hand with the helpers below:
@@ -24,7 +22,7 @@ namespace Clrpp
 ///       DoStuffFn = (delegate* unmanaged[Cdecl]&lt;IntPtr, float, void&gt;)
 ///           InternalCalls.Get("Tests.MyObject::DoStuff(single)");
 /// </summary>
-public static unsafe partial class InternalCalls
+public static unsafe class InternalCalls
 {
     // Installed from native during bootstrap:
     //   resolver(nameUtf8) -> function pointer (or null)

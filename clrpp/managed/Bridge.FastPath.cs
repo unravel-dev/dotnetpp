@@ -1,5 +1,4 @@
 using System;
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -14,6 +13,8 @@ namespace Clrpp
 /// </summary>
 public static partial class Bridge
 {
+    private const int MaxCachedInvokeArity = 8;
+
     // ---------------------------------------------------------------------
     // Array pin cache (thread-local, reused across sequential element copies)
     // ---------------------------------------------------------------------
@@ -22,6 +23,8 @@ public static partial class Bridge
     {
         [ThreadStatic] private static IntPtr s_handle;
         [ThreadStatic] private static GCHandle s_pin;
+        [ThreadStatic] private static int s_elementSize;
+        [ThreadStatic] private static long s_byteLength;
 
         internal static GCHandle Pin(Array array, IntPtr arrayHandle)
         {
@@ -33,7 +36,31 @@ public static partial class Bridge
             ReleaseCurrent();
             s_pin = GCHandle.Alloc(array, GCHandleType.Pinned);
             s_handle = arrayHandle;
+            s_elementSize = 0;
+            s_byteLength = -1;
             return s_pin;
+        }
+
+        internal static int ElementSize(Array array)
+        {
+            if (s_elementSize > 0)
+            {
+                return s_elementSize;
+            }
+
+            s_elementSize = ClrLayout.SizeOf(array.GetType().GetElementType());
+            return s_elementSize;
+        }
+
+        internal static long ByteLength(Array array)
+        {
+            if (s_byteLength >= 0)
+            {
+                return s_byteLength;
+            }
+
+            s_byteLength = array.LongLength * ElementSize(array);
+            return s_byteLength;
         }
 
         internal static void Release(IntPtr arrayHandle)
@@ -52,22 +79,29 @@ public static partial class Bridge
             }
 
             s_handle = IntPtr.Zero;
+            s_elementSize = 0;
+            s_byteLength = -1;
         }
     }
 
     // ---------------------------------------------------------------------
-    // Method invoke cache (metadata + args buffer reuse)
+    // Method invoke cache (MethodInvoker + exact-arity args buffers)
     // ---------------------------------------------------------------------
 
     private sealed class MethodInvokePlan
     {
         public MethodBase Method;
         public ParameterInfo[] Parameters;
+        public MethodInvoker MethodInvoker;
+        public ConstructorInvoker ConstructorInvoker;
+        public BlittableCall BlittableInvoke;
+        public int BlittableArgc = -1;
     }
 
     private static readonly ConditionalWeakTable<MethodBase, MethodInvokePlan> MethodPlans = new();
 
-    [ThreadStatic] private static object[] s_invokeArgs;
+    // Exact-length pools: MethodBase.Invoke / MethodInvoker require argc == Length.
+    [ThreadStatic] private static object[][] s_invokeArgsByArity;
 
     private static MethodInvokePlan GetMethodPlan(IntPtr methodHandle)
     {
@@ -77,39 +111,128 @@ public static partial class Bridge
             return new MethodInvokePlan();
         }
 
-        return MethodPlans.GetValue(method, static m => new MethodInvokePlan
+        return MethodPlans.GetValue(method, static m => CreateMethodPlan(m));
+    }
+
+    private static MethodInvokePlan CreateMethodPlan(MethodBase method)
+    {
+        var plan = new MethodInvokePlan
         {
-            Method = m,
-            Parameters = m.GetParameters(),
-        });
+            Method = method,
+            Parameters = method.GetParameters(),
+        };
+
+        try
+        {
+            if (method is ConstructorInfo ctor)
+            {
+                plan.ConstructorInvoker = ConstructorInvoker.Create(ctor);
+            }
+            else if (method is MethodInfo mi)
+            {
+                plan.MethodInvoker = MethodInvoker.Create(mi);
+                if (TryBuildBlittableCall(mi, plan.Parameters, out var blittable))
+                {
+                    plan.BlittableInvoke = blittable;
+                    plan.BlittableArgc = plan.Parameters.Length;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Keep Method.Invoke fallback; never fail plan creation.
+            Log($"MethodInvoker cache unavailable for {method}: {ex.Message}", "warning");
+        }
+
+        return plan;
+    }
+
+    private static object InvokeWithPlan(MethodInvokePlan plan, object target, object[] managedArgs)
+    {
+        // Constructor reinit on an existing instance has no ConstructorInvoker path.
+        if (plan.Method is ConstructorInfo ctor && target != null)
+        {
+            return ctor.Invoke(target, managedArgs);
+        }
+
+        if (plan.ConstructorInvoker != null)
+        {
+            return plan.ConstructorInvoker.Invoke(managedArgs ?? Array.Empty<object>());
+        }
+
+        if (plan.MethodInvoker != null)
+        {
+            if (managedArgs == null || managedArgs.Length == 0)
+            {
+                return plan.MethodInvoker.Invoke(target);
+            }
+
+            return plan.MethodInvoker.Invoke(target, managedArgs.AsSpan());
+        }
+
+        return plan.Method.Invoke(target, managedArgs);
     }
 
     private static object[] RentInvokeArgs(int argc)
     {
-        var buffer = s_invokeArgs;
-        if (buffer == null || buffer.Length < argc)
+        if (argc <= 0)
         {
-            buffer = new object[Math.Max(argc, 4)];
-            s_invokeArgs = buffer;
+            return null;
         }
 
-        if (argc > 0)
+        var pools = s_invokeArgsByArity;
+        if (pools == null)
         {
-            Array.Clear(buffer, 0, argc);
+            pools = new object[MaxCachedInvokeArity + 1][];
+            s_invokeArgsByArity = pools;
         }
 
+        object[] buffer;
+        if (argc <= MaxCachedInvokeArity)
+        {
+            buffer = pools[argc];
+            if (buffer == null)
+            {
+                buffer = new object[argc];
+                pools[argc] = buffer;
+            }
+        }
+        else
+        {
+            // Rare high-arity calls: keep a single oversized slot and grow as needed.
+            buffer = pools[0];
+            if (buffer == null || buffer.Length != argc)
+            {
+                buffer = new object[argc];
+                pools[0] = buffer;
+            }
+        }
+
+        Array.Clear(buffer, 0, argc);
         return buffer;
     }
 
+    private static void ReturnInvokeArgs(object[] buffer, int argc)
+    {
+        if (buffer == null || argc <= 0)
+        {
+            return;
+        }
+
+        Array.Clear(buffer, 0, argc);
+    }
+
     // ---------------------------------------------------------------------
-    // Field access cache (compiled getters/setters for blittable fields)
+    // Field access cache (offset copy when possible; no Expression.Compile)
     // ---------------------------------------------------------------------
 
     private sealed class FieldAccessPlan
     {
         public FieldInfo Field;
-        public Func<object, object> Getter;
-        public Action<object, object> Setter;
+        public bool IsBlittable;
+        public int Size;
+        public int Offset;
+        public bool HasOffset;
     }
 
     private static readonly ConditionalWeakTable<FieldInfo, FieldAccessPlan> FieldPlans = new();
@@ -118,41 +241,42 @@ public static partial class Bridge
     {
         return FieldPlans.GetValue(field, static f =>
         {
+            var plan = new FieldAccessPlan { Field = f };
             if (!f.FieldType.IsValueType || !ClrLayout.IsBlittable(f.FieldType))
             {
-                return new FieldAccessPlan { Field = f };
+                return plan;
             }
 
-            var targetParam = Expression.Parameter(typeof(object), "target");
-            var instance = f.IsStatic
-                ? null
-                : Expression.Convert(
-                    Expression.Condition(
-                        Expression.Equal(targetParam, Expression.Constant(null)),
-                        Expression.Constant(null, f.DeclaringType),
-                        Expression.Convert(targetParam, f.DeclaringType)),
-                    f.DeclaringType);
-
-            var fieldAccess = Expression.Field(instance, f);
-            var boxed = Expression.Convert(fieldAccess, typeof(object));
-            var getter = Expression.Lambda<Func<object, object>>(boxed, targetParam).Compile();
-
-            Action<object, object> setter = null;
-            if (!f.IsInitOnly)
+            plan.IsBlittable = true;
+            plan.Size = ClrLayout.SizeOf(f.FieldType);
+            if (!f.IsStatic && TryGetInstanceFieldOffset(f, out var offset))
             {
-                var valueParam = Expression.Parameter(typeof(object), "value");
-                var unboxed = Expression.Convert(valueParam, f.FieldType);
-                var assign = Expression.Assign(Expression.Field(instance, f), unboxed);
-                setter = Expression.Lambda<Action<object, object>>(assign, targetParam, valueParam).Compile();
+                plan.HasOffset = true;
+                plan.Offset = offset;
             }
 
-            return new FieldAccessPlan
-            {
-                Field = f,
-                Getter = getter,
-                Setter = setter,
-            };
+            return plan;
         });
+    }
+
+    private static bool TryGetInstanceFieldOffset(FieldInfo field, out int offset)
+    {
+        offset = 0;
+        var declaring = field.DeclaringType;
+        if (declaring == null || !declaring.IsValueType)
+        {
+            return false;
+        }
+
+        try
+        {
+            offset = (int)Marshal.OffsetOf(declaring, field.Name);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static unsafe bool TryFieldGetBlittable(FieldInfo field, object target, ref NativeVariant result,
@@ -164,14 +288,39 @@ public static partial class Bridge
         }
 
         var plan = GetFieldPlan(field);
-        if (plan.Getter == null)
+        if (!plan.IsBlittable)
         {
             return false;
         }
 
         try
         {
-            var value = plan.Getter(target);
+            if (plan.HasOffset && target != null && field.DeclaringType.IsInstanceOfType(target))
+            {
+                var pin = GCHandle.Alloc(target, GCHandleType.Pinned);
+                try
+                {
+                    if (plan.Size > result.Size)
+                    {
+                        throw new ArgumentException(
+                            $"Field {field.Name} value does not fit into {result.Size} bytes");
+                    }
+
+                    Buffer.MemoryCopy(
+                        (byte*)pin.AddrOfPinnedObject() + plan.Offset,
+                        (void*)result.Data,
+                        result.Size,
+                        plan.Size);
+                    result.Size = plan.Size;
+                    return true;
+                }
+                finally
+                {
+                    pin.Free();
+                }
+            }
+
+            var value = field.GetValue(target);
             var written = ClrLayout.Write(value, result.Data, result.Size);
             if (written < 0)
             {
@@ -193,15 +342,39 @@ public static partial class Bridge
                                              NativeExceptionInfo* exInfo)
     {
         var plan = GetFieldPlan(field);
-        if (plan.Setter == null)
+        if (!plan.IsBlittable || field.IsInitOnly)
         {
             return false;
         }
 
         try
         {
+            if (plan.HasOffset && target != null && field.DeclaringType.IsInstanceOfType(target))
+            {
+                if (value.Size > 0 && value.Size < plan.Size)
+                {
+                    throw new ArgumentException(
+                        $"Blob of {value.Size} bytes is too small for {field.FieldType} ({plan.Size} bytes)");
+                }
+
+                var pin = GCHandle.Alloc(target, GCHandleType.Pinned);
+                try
+                {
+                    Buffer.MemoryCopy(
+                        (void*)value.Data,
+                        (byte*)pin.AddrOfPinnedObject() + plan.Offset,
+                        plan.Size,
+                        plan.Size);
+                    return true;
+                }
+                finally
+                {
+                    pin.Free();
+                }
+            }
+
             var managedValue = ClrLayout.Read(field.FieldType, value.Data);
-            plan.Setter(target, managedValue);
+            field.SetValue(target, managedValue);
             return true;
         }
         catch (Exception ex)

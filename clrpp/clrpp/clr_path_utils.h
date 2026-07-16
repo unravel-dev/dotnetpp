@@ -24,7 +24,12 @@ auto list_files(const std::string& dir, const std::string& extension) -> std::ve
 
 auto parse_version(const std::string& text) -> std::vector<int>;
 
+/// Highest versioned subdirectory of `base`. When `preferred` is non-empty
+/// (e.g. {9,0} from "9.0" / "net9.0"), prefer names whose major[/minor]
+/// match and only fall back to the global highest if nothing matches.
 auto pick_highest_version_subdir(const std::string& base) -> std::string;
+auto pick_highest_version_subdir(const std::string& base, const std::vector<int>& preferred)
+	-> std::string;
 
 auto pick_highest_version_dir(const std::string& base) -> std::string;
 

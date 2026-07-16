@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Clrpp
@@ -27,6 +28,18 @@ namespace Clrpp
 /// </summary>
 internal static class ClrLayout
 {
+    private static readonly MethodInfo IsReferenceOrContainsReferencesMethod =
+        typeof(RuntimeHelpers).GetMethod(nameof(RuntimeHelpers.IsReferenceOrContainsReferences))
+        ?? throw new InvalidOperationException("RuntimeHelpers.IsReferenceOrContainsReferences missing");
+
+    private sealed class BlittableFlag
+    {
+        public bool Value;
+    }
+
+    // Weak keys: must not root collectible Type instances across domain unload.
+    private static readonly ConditionalWeakTable<Type, BlittableFlag> BlittableCache = new();
+
     /// Size of a value type as laid out by the runtime (not Marshal.SizeOf).
     public static int SizeOf(Type type) => For(type).Size;
 
@@ -51,20 +64,26 @@ internal static class ClrLayout
     /// copy: a value type without object references.
     public static bool IsBlittable(Type type)
     {
-        if (!type.IsValueType)
+        if (type == null || !type.IsValueType)
         {
             return false;
         }
 
-        try
+        return BlittableCache.GetValue(type, static t =>
         {
-            For(type);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+            var flag = new BlittableFlag();
+            try
+            {
+                var check = IsReferenceOrContainsReferencesMethod.MakeGenericMethod(t);
+                flag.Value = !(bool)check.Invoke(null, null);
+            }
+            catch
+            {
+                flag.Value = false;
+            }
+
+            return flag;
+        }).Value;
     }
 
     // -----------------------------------------------------------------------
@@ -114,7 +133,7 @@ internal static class ClrLayout
             {
                 return (Ops)Activator.CreateInstance(typeof(Ops<>).MakeGenericType(t));
             }
-            catch (System.Reflection.TargetInvocationException tie) when (tie.InnerException != null)
+            catch (TargetInvocationException tie) when (tie.InnerException != null)
             {
                 throw tie.InnerException;
             }

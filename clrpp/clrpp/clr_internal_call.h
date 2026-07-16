@@ -119,8 +119,8 @@ struct icall_abi
 // byte of the return register (MSVC emits `xor al, al`, leaving the upper
 // bits as garbage), while the managed calli site expects a fully defined
 // value - so `false` could randomly arrive as `true` in C#. Widening to
-// int32 on both sides makes the value unambiguous (the managed thunk in
-// InternalCalls.Bind.cs applies the mirrored mapping).
+// int32 on both sides makes the value unambiguous (the woven managed
+// thunk applies the mirrored mapping).
 template <>
 struct icall_abi<bool, bool>
 {

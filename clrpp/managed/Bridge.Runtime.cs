@@ -345,6 +345,26 @@ public static partial class Bridge
         }
         catch (ReflectionTypeLoadException ex)
         {
+            // Typical deploy failure: scripts compiled against a newer
+            // System.Runtime than the bundled runtime can provide. Without
+            // logging this looks like "assembly loaded but has zero types".
+            var loaders = ex.LoaderExceptions?
+                .Where(e => e != null)
+                .Select(e => e.Message)
+                .Distinct()
+                .Take(8)
+                .ToArray() ?? Array.Empty<string>();
+            if (loaders.Length > 0)
+            {
+                Log($"Assembly.GetTypes failed for '{assembly.GetName().Name}': {string.Join(" | ", loaders)}",
+                    "error");
+            }
+            else
+            {
+                Log($"Assembly.GetTypes failed for '{assembly.GetName().Name}' with no loader details",
+                    "error");
+            }
+
             return ex.Types.Where(t => t != null);
         }
     }

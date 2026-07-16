@@ -33,6 +33,12 @@ auto find_reference_assemblies_dir() -> std::string
 		return ANONYMOUS::comp_paths->reference_assemblies_dir;
 	}
 
+	// Compile against the same TFM the bridge / shipped runtime target
+	// (CLRPP_DOTNET_VERSION). Picking the highest installed Ref pack breaks
+	// deploy: scripts compiled vs net10 fail to load types on a pruned net9
+	// runtime root (GetTypes returns empty via ReflectionTypeLoadException).
+	const auto preferred = path_utils::parse_version(get_dotnet_version());
+
 	std::vector<std::string> roots;
 	if(!bridge_detail::dotnet_root().empty())
 	{
@@ -46,14 +52,14 @@ auto find_reference_assemblies_dir() -> std::string
 	for(const auto& root : roots)
 	{
 		auto packs = root + "/packs/Microsoft.NETCore.App.Ref";
-		auto version = path_utils::pick_highest_version_subdir(packs);
+		auto version = path_utils::pick_highest_version_subdir(packs, preferred);
 		if(version.empty())
 		{
 			continue;
 		}
 
 		auto ref_root = packs + "/" + version + "/ref";
-		auto tfm = path_utils::pick_highest_version_subdir(ref_root);
+		auto tfm = path_utils::pick_highest_version_subdir(ref_root, preferred);
 		if(tfm.empty())
 		{
 			continue;

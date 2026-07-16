@@ -200,7 +200,7 @@ public:
 	auto size() const -> size_t
 	{
 		auto raw = clr_array_base::size();
-		return use_raw_bytes_ ? raw / sizeof(T) : raw;
+		return uses_raw_byte_storage() ? raw / sizeof(T) : raw;
 	}
 
 	auto get(size_t index) const -> T
@@ -236,6 +236,25 @@ public:
 	}
 
 private:
+	/// True when this array is a System.Byte[] packing an unknown blittable T
+	/// (see create_array fallback). Recovers the flag when wrapping an existing
+	/// handle where use_raw_bytes_ was not preserved.
+	auto uses_raw_byte_storage() const -> bool
+	{
+		if(use_raw_bytes_)
+		{
+			return true;
+		}
+		if(sizeof(T) <= 1 || !valid())
+		{
+			return false;
+		}
+		const auto element = get_element_type();
+		const auto byte_type = detail::byte_element_type();
+		return element.valid() && byte_type.valid() &&
+			   element.get_internal_ptr() == byte_type.get_internal_ptr();
+	}
+
 	bool use_raw_bytes_{};
 };
 

@@ -129,9 +129,9 @@ public:
 
 	template<typename VectorLike = std::vector<T>>
 	mono_list(const VectorLike& vec)
-		: mono_list_base(create_list(mono_domain::get_current_domain(), vec.size(), {}))
+		: mono_list_base(create_list(mono_domain::get_current_domain(), mono_type{}))
 	{
-		for(auto& item : vec)
+		for(const auto& item : vec)
 		{
 			add(item);
 		}
@@ -218,15 +218,10 @@ public:
 	template<typename VectorLike = std::vector<T>>
 	auto to_vector() const -> VectorLike
 	{
-		auto element_type = get_element_type();
 		VectorLike vec(size());
 		for(size_t i = 0; i < size(); ++i)
 		{
 			vec[i] = get(i);
-			if(!vec[i].get_type().valid())
-			{
-				vec[i] = mono_object(nullptr, element_type);
-			}
 		}
 		return vec;
 	}

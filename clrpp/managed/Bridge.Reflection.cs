@@ -333,29 +333,83 @@ public static partial class Bridge
 
         for (var t = type; t != null; t = t.BaseType)
         {
-            var candidates = t.GetMethods(AllDeclared)
-                .Where(m => m.Name == name && (argc < 0 || m.GetParameters().Length == argc))
-                .ToArray();
+            MethodBase chosen = null;
+            var chosenIsPublic = false;
+            var chosenToken = int.MaxValue;
 
-            if (candidates.Length > 0)
+            foreach (var method in t.GetMethods(AllDeclared))
             {
-                return Intern(candidates[0]);
+                if (method.Name != name)
+                {
+                    continue;
+                }
+
+                if (argc >= 0 && method.GetParameters().Length != argc)
+                {
+                    continue;
+                }
+
+                if (IsBetterMethodCandidate(method, chosen, chosenIsPublic, chosenToken))
+                {
+                    chosen = method;
+                    chosenIsPublic = method.IsPublic;
+                    chosenToken = method.MetadataToken;
+                }
+            }
+
+            if (chosen != null)
+            {
+                return Intern(chosen);
             }
 
             // Constructors are exposed as ".ctor" like in mono.
             if (name == ".ctor")
             {
-                var ctors = t.GetConstructors(AllDeclared)
-                    .Where(c => argc < 0 || c.GetParameters().Length == argc)
-                    .ToArray();
-                if (ctors.Length > 0)
+                chosen = null;
+                chosenIsPublic = false;
+                chosenToken = int.MaxValue;
+                foreach (var ctor in t.GetConstructors(AllDeclared))
                 {
-                    return Intern(ctors[0]);
+                    if (argc >= 0 && ctor.GetParameters().Length != argc)
+                    {
+                        continue;
+                    }
+
+                    if (IsBetterMethodCandidate(ctor, chosen, chosenIsPublic, chosenToken))
+                    {
+                        chosen = ctor;
+                        chosenIsPublic = ctor.IsPublic;
+                        chosenToken = ctor.MetadataToken;
+                    }
+                }
+
+                if (chosen != null)
+                {
+                    return Intern(chosen);
                 }
             }
         }
 
         return IntPtr.Zero;
+    }
+
+    /// Prefer public overloads; break remaining ties with MetadataToken for
+    /// stable binding when multiple same-arity overloads exist. Callers that
+    /// need a specific overload should use TypeGetMethodBySignature.
+    private static bool IsBetterMethodCandidate(MethodBase candidate, MethodBase current,
+                                                bool currentIsPublic, int currentToken)
+    {
+        if (current == null)
+        {
+            return true;
+        }
+
+        if (candidate.IsPublic != currentIsPublic)
+        {
+            return candidate.IsPublic;
+        }
+
+        return candidate.MetadataToken < currentToken;
     }
 
     /// Signature format matches mono_method_desc: "Name(typename,typename)".

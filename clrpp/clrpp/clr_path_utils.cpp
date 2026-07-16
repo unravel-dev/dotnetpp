@@ -211,8 +211,34 @@ auto parse_version(const std::string& text) -> std::vector<int>
 
 auto pick_highest_version_subdir(const std::string& base) -> std::string
 {
+	return pick_highest_version_subdir(base, {});
+}
+
+auto pick_highest_version_subdir(const std::string& base, const std::vector<int>& preferred)
+	-> std::string
+{
 	std::string best;
+	std::string best_match;
 	std::vector<int> best_version;
+	std::vector<int> best_match_version;
+
+	auto matches_preferred = [&](const std::vector<int>& version) -> bool
+	{
+		if(preferred.empty() || version.empty())
+		{
+			return false;
+		}
+		if(version[0] != preferred[0])
+		{
+			return false;
+		}
+		if(preferred.size() > 1 && version.size() > 1 && version[1] != preferred[1])
+		{
+			return false;
+		}
+		return true;
+	};
+
 	for(const auto& name : list_subdirectories(base))
 	{
 		auto version = parse_version(name);
@@ -220,14 +246,25 @@ auto pick_highest_version_subdir(const std::string& base) -> std::string
 		{
 			continue;
 		}
+
 		if(best.empty() || std::lexicographical_compare(best_version.begin(), best_version.end(),
 														version.begin(), version.end()))
 		{
 			best = name;
 			best_version = version;
 		}
+
+		if(matches_preferred(version) &&
+		   (best_match.empty() ||
+			std::lexicographical_compare(best_match_version.begin(), best_match_version.end(),
+										 version.begin(), version.end())))
+		{
+			best_match = name;
+			best_match_version = version;
+		}
 	}
-	return best;
+
+	return best_match.empty() ? best : best_match;
 }
 
 auto pick_highest_version_dir(const std::string& base) -> std::string

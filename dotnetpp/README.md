@@ -40,24 +40,16 @@ Both backends share the `to_mono`/`from_mono` protocol names (read "mono" as
   `[MethodImpl(MethodImplOptions.InternalCall)] extern ...` and the runtime
   binds them to `mono::add_internal_call` registrations automatically.
 - **coreclr**: the runtime has no public icall table, so
-  `[MethodImpl(InternalCall)]` cannot be used by user assemblies. Instead,
-  `Clrpp.InternalCalls.Bind<TDelegate>(name)` resolves the registered native
-  function and emits an IL thunk with all marshalling generated
-  automatically, returned as an ordinary delegate:
+  `[MethodImpl(InternalCall)]` cannot be used by user assemblies as-is.
+  Instead, `dotnet::compile` (and `dotnet::weave_assembly`) rewrites those
+  extern methods with a Mono.Cecil weaver that emits a real body: resolve
+  the registered native function, marshal args, `calli`, release resources,
+  and check the pending exception. Source stays mono-style:
 
   ```csharp
-  static readonly Func<object, string, string> returnAString =
-      InternalCalls.Bind<Func<object, string, string>>("Tests.MyObject::ReturnAString");
-
-  public string ReturnAString(string value) => returnAString(this, value);
+  [MethodImpl(MethodImplOptions.InternalCall)]
+  public extern string ReturnAString(string value);   // works on both backends
   ```
-
-  The generated thunk handles strings (utf8 alloc/free/consume), reference
-  types (GCHandle alloc/free/consume), scalars by value, blittable structs
-  by pointer, and the pending exception check. Bind resolves eagerly (throws
-  `MissingMethodException` if unregistered), so keep bindings in static
-  fields - C# type initializers run lazily, after the native side registered
-  its calls.
 
   A low level escape hatch also exists: `InternalCalls.Get(name)` returns the
   raw pointer for use with `delegate* unmanaged[Cdecl]`, with manual
@@ -68,9 +60,6 @@ Both backends share the `to_mono`/`from_mono` protocol names (read "mono" as
   `clr::raise_exception` stores the exception until the managed caller
   re-throws it).
 
-  The test fixture (`tests/managed/tests.cs`) does not use `Bind`; it relies
-  on the IL weaver below so a single mono-style file runs on both backends.
-
 #### `[InternalCall]` IL weaving on coreclr (compile step)
 
 So the C# side does not change at all, the coreclr backend weaves mono-style
@@ -79,14 +68,7 @@ icalls as part of compilation (Mono.Cecil based, no mono runtime involved).
 `[MethodImpl(MethodImplOptions.InternalCall)] extern` method gets a real
 body that binds the registered native function and calls it through a
 statically-typed `calli` - so mono-style icall declarations (including
-extern constructors) compile and run unchanged:
-
-```csharp
-[MethodImpl(MethodImplOptions.InternalCall)]
-public extern string ReturnAString(string value);   // works on both backends
-```
-
-Details:
+extern constructors) compile and run unchanged.
 
 - Name lookup follows mono's order: the full signature name
   (`"Tests.MyObject::ReturnAString(string)"`) first, then the bare name
@@ -160,7 +142,7 @@ ignores it.
   and implicit framework references from the newest installed
   `Microsoft.NETCore.App.Ref` pack, then weaves mono-style icalls in the
   output (see above). Fixtures only need to reference `Clrpp.Managed.dll`
-  when they use `InternalCalls.Bind`/`Get` directly; woven mono-style icalls
+  when they use `InternalCalls.Get` directly; woven mono-style icalls
   need no compile time reference (the weaver adds the assembly reference).
 
 ### Test suite composition

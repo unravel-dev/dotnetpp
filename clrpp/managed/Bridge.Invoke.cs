@@ -1,6 +1,4 @@
 using System;
-using System.Collections;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -131,6 +129,7 @@ public static partial class Bridge
                                            NativeVariant* args, int argc,
                                            NativeVariant* result, NativeExceptionInfo* exInfo)
     {
+        object[] managedArgs = null;
         try
         {
             var plan = GetMethodPlan(methodHandle);
@@ -139,45 +138,40 @@ public static partial class Bridge
                 throw new ArgumentException("Invalid method handle");
             }
 
-            var target = Target(targetHandle);
+            // Blittable CreateDelegate path: no object[] / no boxing.
+            if (plan.BlittableInvoke != null &&
+                plan.BlittableArgc == argc &&
+                (argc == 0 || ArgsAreBlobs(args, argc)) &&
+                (result->Kind == NativeVariant.KindBlob || result->Kind == NativeVariant.KindEmpty))
+            {
+                var target = Target(targetHandle);
+                plan.BlittableInvoke(target, args, result);
+                return;
+            }
+
+            var targetObj = Target(targetHandle);
             var parameters = plan.Parameters ?? plan.Method.GetParameters();
 
-            object[] managedArgs = null;
             if (argc > 0)
             {
-                var rented = RentInvokeArgs(argc);
+                managedArgs = RentInvokeArgs(argc);
                 for (int i = 0; i < argc; i++)
                 {
                     var expected = i < parameters.Length ? parameters[i].ParameterType : null;
-                    rented[i] = VariantToObject(in args[i], expected);
-                }
-
-                if (rented.Length == argc)
-                {
-                    managedArgs = rented;
-                }
-                else
-                {
-                    managedArgs = new object[argc];
-                    Array.Copy(rented, managedArgs, argc);
+                    managedArgs[i] = VariantToObject(in args[i], expected);
                 }
             }
 
-            object returnValue;
-            if (plan.Method is ConstructorInfo ctor && target != null)
-            {
-                returnValue = ctor.Invoke(target, managedArgs);
-            }
-            else
-            {
-                returnValue = plan.Method.Invoke(target, managedArgs);
-            }
-
+            var returnValue = InvokeWithPlan(plan, targetObj, managedArgs);
             WriteResult(returnValue, ref *result);
         }
         catch (Exception ex)
         {
             FillException(ex, ref *exInfo);
+        }
+        finally
+        {
+            ReturnInvokeArgs(managedArgs, argc);
         }
     }
 
@@ -388,19 +382,11 @@ public static partial class Bridge
         }
     }
 
-    /// Total payload bytes of an array, using the CLR element layout.
-    /// (Buffer.ByteLength would reject non-primitive elements, but typed
-    /// struct arrays like Vector2f[] are valid here too.)
-    private static long ArrayByteLength(Array array)
-    {
-        return array.LongLength * ClrLayout.SizeOf(array.GetType().GetElementType());
-    }
-
     /// Bulk copy out of a blittable-element array. Returns bytes copied or -1.
     [UnmanagedCallersOnly]
     public static unsafe long ArrayCopyTo(IntPtr arrayHandle, long byteOffset, IntPtr dest, long byteCount)
     {
-        if (Target(arrayHandle) is not Array array || dest == IntPtr.Zero || byteOffset < 0)
+        if (Target(arrayHandle) is not Array array || dest == IntPtr.Zero || byteOffset < 0 || byteCount < 0)
         {
             return -1;
         }
@@ -408,10 +394,16 @@ public static partial class Bridge
         try
         {
             var pin = ArrayPinCache.Pin(array, arrayHandle);
-            var count = Math.Min(byteCount, ArrayByteLength(array) - byteOffset);
-            if (count < 0)
+            var total = ArrayPinCache.ByteLength(array);
+            if (byteOffset > total)
             {
                 return -1;
+            }
+
+            var count = Math.Min(byteCount, total - byteOffset);
+            if (count == 0)
+            {
+                return 0;
             }
 
             Buffer.MemoryCopy((byte*)pin.AddrOfPinnedObject() + byteOffset, (void*)dest, byteCount, count);
@@ -428,7 +420,7 @@ public static partial class Bridge
     [UnmanagedCallersOnly]
     public static unsafe long ArrayCopyFrom(IntPtr arrayHandle, long byteOffset, IntPtr src, long byteCount)
     {
-        if (Target(arrayHandle) is not Array array || src == IntPtr.Zero || byteOffset < 0)
+        if (Target(arrayHandle) is not Array array || src == IntPtr.Zero || byteOffset < 0 || byteCount < 0)
         {
             return -1;
         }
@@ -436,11 +428,16 @@ public static partial class Bridge
         try
         {
             var pin = ArrayPinCache.Pin(array, arrayHandle);
-            var total = ArrayByteLength(array);
-            var count = Math.Min(byteCount, total - byteOffset);
-            if (count < 0)
+            var total = ArrayPinCache.ByteLength(array);
+            if (byteOffset > total)
             {
                 return -1;
+            }
+
+            var count = Math.Min(byteCount, total - byteOffset);
+            if (count == 0)
+            {
+                return 0;
             }
 
             Buffer.MemoryCopy((void*)src, (byte*)pin.AddrOfPinnedObject() + byteOffset, total - byteOffset, count);

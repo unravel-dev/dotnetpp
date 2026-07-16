@@ -40,12 +40,14 @@ struct valuetype_list_invokers
 	clr_method_invoker<void(const T&)> add;
 	clr_method_invoker<T(int32_t)> get_item;
 	clr_method_invoker<void(int32_t, const T&)> set_item;
+	clr_method_invoker<void(clr_array<T>&)> copy_to;
 
 	explicit valuetype_list_invokers(const clr_type& type)
 		: add_range(make_method_invoker<void(clr_array<T>&)>(type.get_method("AddRange", 1), false))
 		, add(make_method_invoker<void(const T&)>(type, "Add"))
 		, get_item(make_method_invoker<T(int32_t)>(type.get_method("get_Item", 1), false))
 		, set_item(make_method_invoker<void(int32_t, const T&)>(type.get_method("set_Item", 2), false))
+		, copy_to(make_method_invoker<void(clr_array<T>&)>(type.get_method("CopyTo", 1), false))
 	{
 	}
 };
@@ -56,12 +58,14 @@ struct object_list_invokers
 	clr_method_invoker<void(clr_object)> add;
 	clr_method_invoker<clr_object(int32_t)> get_item;
 	clr_method_invoker<void(int32_t, clr_object)> set_item;
+	clr_method_invoker<void(clr_array<clr_object>&)> copy_to;
 
 	explicit object_list_invokers(const clr_type& type)
 		: add_range(make_method_invoker<void(clr_array<clr_object>&)>(type.get_method("AddRange", 1), false))
 		, add(make_method_invoker<void(clr_object)>(type.get_method("Add", 1), false))
 		, get_item(make_method_invoker<clr_object(int32_t)>(type.get_method("get_Item", 1), false))
 		, set_item(make_method_invoker<void(int32_t, clr_object)>(type.get_method("set_Item", 2), false))
+		, copy_to(make_method_invoker<void(clr_array<clr_object>&)>(type.get_method("CopyTo", 1), false))
 	{
 	}
 };
@@ -185,23 +189,26 @@ public:
 
 	auto to_list() const -> std::list<T>
 	{
-		std::list<T> result;
-		std::size_t n = size();
-		for(std::size_t i = 0; i < n; i++)
-		{
-			result.push_back(get(i));
-		}
-		return result;
+		auto vec = to_vector();
+		return std::list<T>(vec.begin(), vec.end());
 	}
 
 	template <typename VectorLike = std::vector<T>>
 	auto to_vector() const -> VectorLike
 	{
-		VectorLike vec(size());
-		for(size_t i = 0; i < vec.size(); ++i)
+		const auto count = size();
+		VectorLike vec(count);
+		if(count == 0)
 		{
-			vec[i] = get(i);
+			return vec;
 		}
+
+		ensure_typed_invokers();
+		// One CopyTo into a managed array, then one bulk blittable read —
+		// avoids N get_Item reflection invokes.
+		clr_array<T> scratch(vec, get_element_type());
+		(*typed_invokers_).copy_to(const_cast<clr_list&>(*this), scratch);
+		detail::read_array_to_vector(scratch, vec);
 		return vec;
 	}
 
@@ -313,10 +320,20 @@ public:
 	auto to_vector() const -> VectorLike
 	{
 		auto element_type = get_element_type();
-		VectorLike vec(size());
-		for(size_t i = 0; i < vec.size(); ++i)
+		const auto count = size();
+		VectorLike vec(count);
+		if(count == 0)
 		{
-			vec[i] = get(i);
+			return vec;
+		}
+
+		ensure_typed_invokers();
+		clr_array<clr_object> scratch(managed_ptr::adopt(bridge().array_create(
+			element_type.get_internal_ptr(), static_cast<int64_t>(count))));
+		(*typed_invokers_).copy_to(const_cast<clr_list&>(*this), scratch);
+		for(size_t i = 0; i < count; ++i)
+		{
+			vec[i] = scratch.get(i);
 			if(!vec[i].get_type().valid())
 			{
 				vec[i] = clr_object(managed_ptr{}, element_type);

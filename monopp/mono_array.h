@@ -399,7 +399,7 @@ struct mono_converter<mono_array<T>>
 	{
 		if(!obj)
 		{
-			return {};
+			return mono_array<T>(mono_object{});
 		}
 		return mono_array<T>(mono_object(obj));
 	}

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
+#include <list>
+#include <string>
 #include <vector>
 
 #include <dotnetpp/dotnetpp.h>
@@ -42,7 +44,61 @@ struct dn_two_bools
 	bool a;
 	bool b;
 };
+
+/*
+ * Converted custom type (engine color pattern): packed bytes native-side,
+ * four floats managed-side (Tests.ColorF). Exercises
+ * dotnet_register_converter_for_pod in the functional suite.
+ */
+struct dn_color
+{
+	std::uint8_t r;
+	std::uint8_t g;
+	std::uint8_t b;
+	std::uint8_t a;
+};
+
+struct dn_color_managed
+{
+	float r;
+	float g;
+	float b;
+	float a;
+};
 } // namespace
+
+namespace dotnetpp_backend
+{
+namespace managed_interface
+{
+
+namespace
+{
+auto to_byte(float value) -> std::uint8_t
+{
+	const float scaled = value * 255.0f;
+	const float clamped = scaled < 0.0f ? 0.0f : (scaled > 255.0f ? 255.0f : scaled);
+	return static_cast<std::uint8_t>(clamped);
+}
+} // namespace
+
+template <>
+auto converter::convert(const dn_color& c) -> dn_color_managed
+{
+	return {static_cast<float>(c.r) / 255.0f, static_cast<float>(c.g) / 255.0f,
+			static_cast<float>(c.b) / 255.0f, static_cast<float>(c.a) / 255.0f};
+}
+
+template <>
+auto converter::convert(const dn_color_managed& c) -> dn_color
+{
+	return {to_byte(c.r), to_byte(c.g), to_byte(c.b), to_byte(c.a)};
+}
+
+} // namespace managed_interface
+} // namespace dotnetpp_backend
+
+dotnet_register_converter_for_pod(dn_color, dn_color_managed);
 
 namespace dotnetpp
 {
@@ -1211,6 +1267,531 @@ void test_suite()
 			auto used = dotnet::gc_get_used_size();
 			EXPECT(heap >= 0);
 			EXPECT(used >= 0);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : domain helpers")
+	{
+		auto expression = [&]()
+		{
+			EXPECT(domain.get_name() == std::string("dotnetpp_domain"));
+			EXPECT(dotnet::domain::get_current_domain().get_name() == std::string("dotnetpp_domain"));
+
+			auto via_domain = domain.get_type("Tests", "MonoppTest");
+			EXPECT(via_domain.valid());
+			EXPECT(via_domain.get_fullname() == std::string("Tests.MonoppTest"));
+
+			auto via_fullname = domain.get_type("Tests.MonoppTest");
+			EXPECT(via_fullname.valid());
+
+			auto str = domain.new_string("hello-domain");
+			EXPECT(str.as_utf8() == std::string("hello-domain"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : assembly enumeration and corlib")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto types = assembly.get_types();
+			EXPECT(!types.empty());
+
+			bool found_monopp = false;
+			for(const auto& t : types)
+			{
+				if(t.get_fullname() == "Tests.MonoppTest")
+				{
+					found_monopp = true;
+					break;
+				}
+			}
+			EXPECT(found_monopp);
+
+			auto corlib = dotnet::assembly::get_corlib();
+			auto string_type = corlib.get_type("System", "String");
+			EXPECT(string_type.valid());
+			EXPECT(string_type.is_string());
+			EXPECT(string_type.is_class());
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : type classification and nested types")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+
+			auto nested_outer = assembly.get_type("Tests.Nested", "TestClassNested1");
+			auto nested = nested_outer.get_nested_types();
+			EXPECT(!nested.empty());
+			bool found_inner = false;
+			for(const auto& t : nested)
+			{
+				if(t.get_name() == "TestClassNested2")
+				{
+					found_inner = true;
+					EXPECT(t.get_nesting_type().get_fullname() == nested_outer.get_fullname());
+				}
+			}
+			EXPECT(found_inner);
+
+			EXPECT(assembly.get_type("Tests", "IMarker").is_interface());
+			EXPECT(assembly.get_type("Tests", "AbstractBase").is_abstract());
+			EXPECT(assembly.get_type("Tests", "SealedMarker").is_sealed());
+			EXPECT(assembly.get_type("Tests", "SealedMarker").is_serializable());
+
+			auto enum_type = assembly.get_type("Tests", "TestEnum");
+			EXPECT(enum_type.get_enum_base_type().get_fullname() == std::string("System.Int32"));
+			EXPECT(enum_type.get_hash() == dotnet::type::get_hash("Tests.TestEnum"));
+			EXPECT(enum_type.get_alignof() >= 1u);
+
+			auto list_obj = dotnet::make_method_invoker<dotnet::list<int>()>(
+				assembly.get_type("Tests", "MonoppTest"), "MakeList")();
+			EXPECT(list_obj.get_type().is_list());
+			EXPECT(list_obj.get_element_type().get_fullname() == std::string("System.Int32"));
+
+			std::vector<int> values = {1, 2};
+			dotnet::array<int> arr(values);
+			EXPECT(arr.get_type().is_array());
+			EXPECT(arr.get_type().get_rank() == 1);
+			EXPECT(arr.get_element_type().get_fullname() == std::string("System.Int32"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : attributes and include_base members")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto derived = assembly.get_type("Tests", "DerivedTest");
+
+			auto attrs = type.get_attributes();
+			EXPECT(!attrs.empty());
+			bool found_marker = false;
+			for(const auto& attr : attrs)
+			{
+				if(attr.get_type().get_fullname() == "Tests.MarkerAttribute")
+				{
+					found_marker = true;
+				}
+			}
+			EXPECT(found_marker);
+
+			auto field = type.get_field("markedField");
+			EXPECT(field.has_attribute("MarkerAttribute"));
+			EXPECT(field.has_attribute_fullname("Tests.MarkerAttribute"));
+			EXPECT(field.get_attribute("MarkerAttribute").valid());
+			EXPECT(field.get_attribute_fullname("Tests.MarkerAttribute").valid());
+			EXPECT(!field.get_attributes().empty());
+
+			auto prop = type.get_property("MarkedProperty");
+			EXPECT(prop.has_attribute("MarkerAttribute"));
+			EXPECT(!prop.get_attributes().empty());
+
+			auto method = type.get_method("VirtualEcho", 1);
+			EXPECT(!method.get_attributes().empty());
+
+			auto derived_only = derived.get_fields(false);
+			auto derived_with_base = derived.get_fields(true);
+			EXPECT(derived_with_base.size() > derived_only.size());
+
+			auto methods_local = derived.get_methods(false);
+			auto methods_base = derived.get_methods(true);
+			EXPECT(methods_base.size() > methods_local.size());
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : field flags and declnames")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+
+			auto const_field = type.get_field("ConstValue");
+			EXPECT(const_field.is_const());
+			EXPECT(const_field.is_static());
+			EXPECT(const_field.get_fullname().find("ConstValue") != std::string::npos);
+			EXPECT(const_field.get_full_declname().find("ConstValue") != std::string::npos);
+
+			auto readonly_field = type.get_field("ReadonlyValue");
+			EXPECT(readonly_field.is_readonly());
+			EXPECT(!readonly_field.is_const());
+
+			bool found_backing = false;
+			for(const auto& field : type.get_fields())
+			{
+				if(field.is_backing_field())
+				{
+					found_backing = true;
+					break;
+				}
+			}
+			EXPECT(found_backing);
+
+			EXPECT(dotnet::to_string(dotnet::visibility::vis_public) == std::string("public"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : method flags and invoker factories")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto obj = type.new_instance();
+
+			auto virtual_method = type.get_method("VirtualEcho", 1);
+			EXPECT(virtual_method.valid());
+			EXPECT(virtual_method.is_virtual());
+			EXPECT(virtual_method.get_fullname().find("VirtualEcho") != std::string::npos);
+			EXPECT(virtual_method.get_full_declname().find("VirtualEcho") != std::string::npos);
+
+			auto from_method = dotnet::make_method_invoker<int(int)>(virtual_method);
+			EXPECT(from_method(obj, 5) == 6);
+
+			auto from_object = dotnet::make_method_invoker<int(int)>(obj, "VirtualEcho");
+			EXPECT(from_object(obj, 5) == 6);
+
+			auto derived = assembly.get_type("Tests", "DerivedTest");
+			auto derived_obj = derived.new_instance();
+			auto derived_virtual = dotnet::make_method_invoker<int(int)>(derived, "VirtualEcho");
+			EXPECT(derived_virtual(derived_obj, 5) == 15);
+
+			auto icall = type.get_method("NativeAdd", 2);
+#if DOTNETPP_BACKEND_MONO
+			EXPECT(icall.is_internal_call());
+#else
+			// The weaver emits a real body and clears MethodImplOptions.InternalCall.
+			EXPECT(!icall.is_internal_call());
+#endif
+			EXPECT(icall.is_static());
+
+			EXPECT(obj.get_type().get_fullname() == std::string("Tests.MonoppTest"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : object reference fields")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto obj = type.new_instance();
+			auto other = type.new_instance();
+
+			auto field = dotnet::make_field_invoker<dotnet::object>(type.get_field("objField"));
+			EXPECT(!field.get_value(obj).valid());
+
+			field.set_value(obj, other);
+			auto got = field.get_value(obj);
+			EXPECT(got.valid());
+			EXPECT(got.get_type().get_fullname() == std::string("Tests.MonoppTest"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : indexed property")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto obj = type.new_instance();
+
+			auto prop = type.get_property("Item");
+			auto invoker = dotnet::make_property_invoker<int>(prop);
+			EXPECT(invoker.get_value_with_args(obj, 1) == 20);
+
+			invoker.set_value_with_args(obj, 1, 77);
+			EXPECT(invoker.get_value_with_args(obj, 1) == 77);
+
+			auto readonly_prop = type.get_property("ReadonlyProperty");
+			EXPECT(readonly_prop.is_readonly());
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : extended primitive and enum marshalling")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+
+			auto echo_byte = dotnet::make_method_invoker<std::uint8_t(std::uint8_t)>(type, "EchoByte");
+			EXPECT(echo_byte(static_cast<std::uint8_t>(10)) == static_cast<std::uint8_t>(11));
+
+			auto echo_sbyte = dotnet::make_method_invoker<std::int8_t(std::int8_t)>(type, "EchoSByte");
+			EXPECT(echo_sbyte(static_cast<std::int8_t>(10)) == static_cast<std::int8_t>(9));
+
+			auto echo_ushort =
+				dotnet::make_method_invoker<std::uint16_t(std::uint16_t)>(type, "EchoUShort");
+			EXPECT(echo_ushort(static_cast<std::uint16_t>(1000)) == static_cast<std::uint16_t>(1001));
+
+			auto echo_uint = dotnet::make_method_invoker<std::uint32_t(std::uint32_t)>(type, "EchoUInt");
+			EXPECT(echo_uint(100u) == 101u);
+
+			auto echo_char = dotnet::make_method_invoker<char16_t(char16_t)>(type, "EchoChar");
+			EXPECT(echo_char(u'a') == u'b');
+
+			auto echo_enum = dotnet::make_method_invoker<int(int)>(type, "EchoEnum");
+			EXPECT(echo_enum(5) == 5);
+
+			auto enum_to_int = dotnet::make_method_invoker<int(int)>(type, "EnumToInt");
+			EXPECT(enum_to_int(42) == 42);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : converted custom POD type")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+
+			auto brighten = dotnet::make_method_invoker<dn_color(dn_color)>(type, "Brighten");
+			dn_color input{25, 50, 75, 255};
+			auto output = brighten(input);
+
+			// Managed adds 0.1f to each channel (clamped through converter).
+			EXPECT(output.r > input.r);
+			EXPECT(output.g > input.g);
+			EXPECT(output.b > input.b);
+			EXPECT(output.a == input.a);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : array returns and object arrays")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+
+			auto make_ints = dotnet::make_method_invoker<std::vector<int>()>(type, "MakeIntArray");
+			auto ints = make_ints();
+			EXPECT(ints.size() == 4);
+			EXPECT(ints[0] == 1);
+			EXPECT(ints[3] == 4);
+
+			auto as_array = dotnet::make_method_invoker<dotnet::array<int>()>(type, "MakeIntArray");
+			auto managed_arr = as_array();
+			EXPECT(managed_arr.size() == 4);
+			EXPECT(managed_arr.get_element_type().get_fullname() == std::string("System.Int32"));
+
+			auto host = assembly.get_type("Tests", "ObjectArrayHost");
+			auto make_method = host.get_method("MakeObjectArray", 0);
+			auto make_objs =
+				dotnet::make_method_invoker<dotnet::array<dotnet::object>()>(make_method, false);
+			auto objs = make_objs();
+			EXPECT(objs.size() == 2);
+			EXPECT(objs.get(0).valid());
+			EXPECT(objs.get(1).get_type().get_fullname() == std::string("Tests.MonoppTest"));
+
+			auto count_method = host.get_method("CountValid", 1);
+			auto count =
+				dotnet::make_method_invoker<int(dotnet::array<dotnet::object>)>(count_method, false);
+			EXPECT(count(objs) == 2);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : list clear to_vector to_list and std::list")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+
+			auto make_list = dotnet::make_method_invoker<dotnet::list<int>()>(type, "MakeList");
+			auto list = make_list();
+			auto as_vector = list.to_vector();
+			EXPECT(as_vector.size() == 3);
+			EXPECT(as_vector[1] == 2);
+
+			auto as_std_list = list.to_list();
+			EXPECT(as_std_list.size() == 3);
+			EXPECT(as_std_list.front() == 1);
+
+			list.clear();
+			EXPECT(list.size() == 0);
+
+			auto double_list =
+				dotnet::make_method_invoker<std::list<int>(std::list<int>)>(type, "DoubleList");
+			std::list<int> input = {1, 2, 3};
+			auto doubled = double_list(input);
+			EXPECT(doubled.size() == 3);
+			EXPECT(doubled.front() == 2);
+			EXPECT(doubled.back() == 6);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : array and list pinning helpers")
+	{
+		auto expression = [&]()
+		{
+			std::vector<int> values = {1, 2, 3};
+			dotnet::array<int> arr(values);
+			auto pinned_arr = dotnet::make_array_pinned(arr);
+			EXPECT(pinned_arr->is_locked());
+			EXPECT(pinned_arr->get_array().size() == 3);
+
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto list = dotnet::make_method_invoker<dotnet::list<int>()>(type, "MakeList")();
+			auto pinned_list = dotnet::make_list_pinned(list);
+			EXPECT(pinned_list->is_locked());
+			EXPECT(pinned_list->get_list().size() == 3);
+
+			auto obj = type.new_instance();
+			auto result = dotnet::with_pinned(obj,
+											 [](const dotnet::object& pinned) {
+												 return pinned.valid();
+											 });
+			EXPECT(result == true);
+
+			std::vector<dotnet::object> objs = {obj, type.new_instance()};
+			auto pins = dotnet::pin_vector_elements(objs);
+			EXPECT(pins.size() == 2);
+			EXPECT(pins[0]->is_locked());
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : thunk exception details and stack frame parse")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto method_thunk = dotnet::make_method_invoker<void()>(type, "Function5");
+
+			bool caught = false;
+			try
+			{
+				method_thunk();
+			}
+			catch(const dotnet::thunk_exception& ex)
+			{
+				caught = true;
+				EXPECT(ex.exception_typename().find("Exception") != std::string::npos);
+				EXPECT(ex.message().find("Hello!") != std::string::npos);
+				EXPECT(!ex.stacktrace().empty());
+			}
+			EXPECT(caught);
+
+			const std::string sample = "at Tests.MonoppTest.Function5() in /tmp/tests.cs:42\n"
+									   "at Other.Thing() in /tmp/other.cs:9\n";
+			auto frame = dotnet::extract_relevant_stack_frame(sample);
+			EXPECT(frame.file_name.find("tests.cs") != std::string::npos);
+			EXPECT(frame.line == 42);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : logger")
+	{
+		auto expression = [&]()
+		{
+			std::string captured;
+			dotnet::set_log_handler("tests",
+									[&](const std::string& message) {
+										captured = message;
+									});
+			EXPECT(static_cast<bool>(dotnet::get_log_handler("tests")));
+			dotnet::log_message("ping", "tests");
+			EXPECT(captured == std::string("ping"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : compile helpers weave and runtime queries")
+	{
+		auto expression = [&]()
+		{
+			dotnet::compiler_params params;
+			params.files = {DATA_DIR DOTNETPP_TESTS_FIXTURE};
+			params.output_name = DATA_DIR "dotnetpp_tests_managed_helpers.dll";
+
+			auto cmd = dotnet::create_compile_command(params);
+			EXPECT(!cmd.empty());
+
+			auto detailed = dotnet::create_compile_command_detailed(params);
+			EXPECT(!detailed.cmd.empty());
+			EXPECT(!detailed.args.empty());
+
+			EXPECT(dotnet::weave_assembly(DATA_DIR "dotnetpp_tests_managed.dll") == true);
+
+			auto core = dotnet::get_core_assembly_path();
+			EXPECT(!core.empty());
+
+			auto libs = dotnet::get_common_library_names();
+			EXPECT(!libs.empty());
+
+			auto paths = dotnet::get_common_library_paths();
+			EXPECT(!paths.empty());
+
+			// Soft debugger is off in the suite.
+			EXPECT(dotnet::is_debugger_attached() == false);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : child domain")
+	{
+		auto expression = [&]()
+		{
+			dotnet::domain child("dotnetpp_child");
+			EXPECT(child.get_name() == std::string("dotnetpp_child"));
+
+			dotnet::domain::set_current_domain(child);
+			EXPECT(dotnet::domain::get_current_domain().get_name() == std::string("dotnetpp_child"));
+
+			auto assembly = child.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto thunk = dotnet::make_method_invoker<int(int)>(type, "Function1");
+			EXPECT(thunk(1) == 1338);
+
+			dotnet::domain::set_current_domain(domain);
+			EXPECT(dotnet::domain::get_current_domain().get_name() == std::string("dotnetpp_domain"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : non-blittable icall is uncallable")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "PackTest");
+			auto check = dotnet::make_method_invoker<bool()>(type, "RejectNonBlittableIsUncallable");
+			EXPECT(check() == true);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : new_instance into explicit domain")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto obj = type.new_instance(domain);
+			EXPECT(obj.valid());
+			EXPECT(obj.get_type().get_fullname() == std::string("Tests.MonoppTest"));
 		};
 		EXPECT_NOTHROWS(expression());
 	};

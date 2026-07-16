@@ -12,6 +12,17 @@ using System.Runtime.CompilerServices;
 namespace Tests
 {
 
+[AttributeUsage(AttributeTargets.All, AllowMultiple = false)]
+public class MarkerAttribute : Attribute
+{
+	public string Tag { get; private set; }
+
+	public MarkerAttribute(string tag)
+	{
+		Tag = tag;
+	}
+}
+
 namespace Nested
 {
 class TestClassNested1
@@ -29,6 +40,37 @@ public enum TestEnum
 	First = 1,
 	Second = 5,
 	Third = 42
+}
+
+public enum ByteEnum : byte
+{
+	Alpha = 1,
+	Beta = 2
+}
+
+public interface IMarker
+{
+	void Ping();
+}
+
+public abstract class AbstractBase
+{
+	public abstract int GetValue();
+}
+
+[Serializable]
+public sealed class SealedMarker
+{
+	public int Value = 1;
+}
+
+// Native layout mirror for converter registration tests (four floats).
+public struct ColorF
+{
+	public float R;
+	public float G;
+	public float B;
+	public float A;
 }
 
 class MyObject
@@ -56,10 +98,21 @@ class MyObject
 	public extern string ReturnAString(string value);
 }
 
+[Marker("MonoppTest")]
 class MonoppTest
 {
 	public int someField = 12;
 	public string someFieldStr = "InitialString";
+	public object refField;
+	public MonoppTest objField;
+
+	public const int ConstValue = 42;
+	public readonly int ReadonlyValue = 7;
+
+	[Marker("Field")]
+	public int markedField = 3;
+
+	private int[] indexedItems = new int[] { 10, 20, 30, 40 };
 
 	public int someProperty
 	{
@@ -83,6 +136,28 @@ class MonoppTest
 		{
 			someFieldStr = value;
 		}
+	}
+
+	[Marker("Property")]
+	public int MarkedProperty
+	{
+		get { return markedField; }
+		set { markedField = value; }
+	}
+
+	// Real auto-property so the suite can assert is_backing_field().
+	public int AutoProperty { get; set; }
+
+	// Default indexer name is "Item".
+	public int this[int index]
+	{
+		get { return indexedItems[index]; }
+		set { indexedItems[index] = value; }
+	}
+
+	public int ReadonlyProperty
+	{
+		get { return ReadonlyValue; }
 	}
 
 	public static int someFieldStatic = 12;
@@ -119,6 +194,12 @@ class MonoppTest
 	public string Method5(string s, int b)
 	{
 		return "Return Value: " + s;
+	}
+
+	[Marker("Method")]
+	public virtual int VirtualEcho(int value)
+	{
+		return value + 1;
 	}
 
 	public static int Function1(int a)
@@ -178,6 +259,52 @@ class MonoppTest
 		return a + b + c + d;
 	}
 
+	public static byte EchoByte(byte v)
+	{
+		return (byte)(v + 1);
+	}
+
+	public static sbyte EchoSByte(sbyte v)
+	{
+		return (sbyte)(v - 1);
+	}
+
+	public static ushort EchoUShort(ushort v)
+	{
+		return (ushort)(v + 1);
+	}
+
+	public static uint EchoUInt(uint v)
+	{
+		return v + 1;
+	}
+
+	public static char EchoChar(char v)
+	{
+		return (char)(v + 1);
+	}
+
+	public static TestEnum EchoEnum(TestEnum value)
+	{
+		return value;
+	}
+
+	public static int EnumToInt(TestEnum value)
+	{
+		return (int)value;
+	}
+
+	public static ColorF Brighten(ColorF c)
+	{
+		return new ColorF
+		{
+			R = c.R + 0.1f,
+			G = c.G + 0.1f,
+			B = c.B + 0.1f,
+			A = c.A
+		};
+	}
+
 	// Array / list marshalling.
 	public static int SumArray(int[] values)
 	{
@@ -187,6 +314,11 @@ class MonoppTest
 			sum += v;
 		}
 		return sum;
+	}
+
+	public static int[] MakeIntArray()
+	{
+		return new int[] { 1, 2, 3, 4 };
 	}
 
 	public static List<int> MakeList()
@@ -202,6 +334,16 @@ class MonoppTest
 			sum += v;
 		}
 		return sum;
+	}
+
+	public static List<int> DoubleList(List<int> values)
+	{
+		var result = new List<int>(values.Count);
+		foreach (int v in values)
+		{
+			result.Add(v * 2);
+		}
+		return result;
 	}
 
 	// Native exceptions propagating into managed code.
@@ -233,6 +375,33 @@ class MonoppTest
 
 class DerivedTest : MonoppTest
 {
+	public override int VirtualEcho(int value)
+	{
+		return value + 10;
+	}
+
+	public int derivedOnlyField = 99;
+}
+
+class ObjectArrayHost
+{
+	public static MonoppTest[] MakeObjectArray()
+	{
+		return new MonoppTest[] { new MonoppTest(), new MonoppTest() };
+	}
+
+	public static int CountValid(MonoppTest[] values)
+	{
+		int count = 0;
+		foreach (var v in values)
+		{
+			if (v != null)
+			{
+				count++;
+			}
+		}
+		return count;
+	}
 }
 
 public struct Vector2f
@@ -357,10 +526,23 @@ class PackTest
 		public string Name;
 	}
 
-	// Never invoked: the weaver must skip this one (reference field in a
-	// by-value struct) without affecting the other externs in this class.
+	// Weaver must skip this one (reference field in a by-value struct)
+	// without affecting the other externs in this class.
 	[MethodImpl(MethodImplOptions.InternalCall)]
 	public static extern void RejectNonBlittable(NotBlittable value);
+
+	public static bool RejectNonBlittableIsUncallable()
+	{
+		try
+		{
+			RejectNonBlittable(new NotBlittable { Name = "x" });
+			return false;
+		}
+		catch
+		{
+			return true;
+		}
+	}
 }
 
 class MonortTest
