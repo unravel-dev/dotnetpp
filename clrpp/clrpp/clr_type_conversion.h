@@ -28,12 +28,12 @@ struct clr_converter<clr_object>
 	using native_type = clr_object;
 	using managed_type = managed_ptr;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj.get_managed_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{
@@ -49,13 +49,13 @@ struct clr_converter<clr_type>
 	using native_type = clr_type;
 	using managed_type = managed_ptr;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		// Type handles are interned; sharing hands back the same handle.
 		return managed_ptr::share(obj.get_internal_ptr());
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{
@@ -75,12 +75,12 @@ struct clr_converter<std::string>
 	using native_type = std::string;
 	using managed_type = managed_ptr;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return managed_ptr::adopt(bridge().string_create(obj.c_str()));
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{
@@ -90,7 +90,7 @@ struct clr_converter<std::string>
 	}
 
 	// Internal call argument path (utf8 owned by the managed caller).
-	static auto from_mono(const char* utf8) -> native_type
+	static auto from_managed(const char* utf8) -> native_type
 	{
 		return utf8 ? native_type(utf8) : native_type{};
 	}

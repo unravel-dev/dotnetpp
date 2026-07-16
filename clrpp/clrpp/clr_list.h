@@ -366,12 +366,12 @@ struct clr_converter<clr_list<T>>
 	using native_type = clr_list<T>;
 	using managed_type = managed_ptr;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj.get_managed_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		return native_type(managed_ptr::share(obj.get()));
 	}
@@ -383,13 +383,13 @@ struct clr_converter<std::list<T>>
 	using native_type = std::list<T>;
 	using managed_type = managed_ptr;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		std::vector<T> vec(obj.begin(), obj.end());
 		return clr_list<T>(vec).get_managed_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{

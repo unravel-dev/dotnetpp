@@ -1,4 +1,5 @@
 #include "clr_assembly.h"
+#include "clr_bridge_utils.h"
 #include "clr_domain.h"
 #include "clr_exception.h"
 
@@ -58,48 +59,30 @@ auto clr_assembly::get_type(const std::string& name_space, const std::string& na
 
 auto clr_assembly::get_types() const -> std::vector<clr_type>
 {
-	std::vector<clr_type> result;
 	if(!valid())
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().assembly_get_types(assembly_, nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().assembly_get_types(assembly_, handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_type(handle));
-	}
-	return result;
+	return fetch_and_map<clr_type>(
+		[this](clr_handle* buffer, int32_t count)
+		{ return bridge().assembly_get_types(assembly_, buffer, count); },
+		[](clr_handle handle) { return clr_type(handle); });
 }
 
 auto clr_assembly::get_types_derived_from(const clr_type& base) const -> std::vector<clr_type>
 {
-	std::vector<clr_type> result;
 	if(!valid() || !base.valid())
 	{
-		return result;
+		return {};
 	}
 
-	auto count = bridge().assembly_get_types_derived_from(assembly_, base.get_internal_ptr(), nullptr, 0);
-	std::vector<clr_handle> handles(static_cast<size_t>(count > 0 ? count : 0));
-	if(count > 0)
-	{
-		bridge().assembly_get_types_derived_from(assembly_, base.get_internal_ptr(), handles.data(), count);
-	}
-
-	result.reserve(handles.size());
-	for(auto handle : handles)
-	{
-		result.emplace_back(clr_type(handle));
-	}
-	return result;
+	return fetch_and_map<clr_type>(
+		[this, &base](clr_handle* buffer, int32_t count)
+		{
+			return bridge().assembly_get_types_derived_from(assembly_, base.get_internal_ptr(), buffer, count);
+		},
+		[](clr_handle handle) { return clr_type(handle); });
 }
 
 auto clr_assembly::get_corlib() -> clr_assembly

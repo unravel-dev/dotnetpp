@@ -24,13 +24,13 @@ namespace managed_interface
 		static_assert(is_mono_valuetype<managed_type>::value,                                                \
 					  "basic_mono_converter is only for value types");                                       \
                                                                                                              \
-		static auto to_mono(const native_type& obj) -> managed_type                                          \
+		static auto to_managed(const native_type& obj) -> managed_type                                          \
 		{                                                                                                    \
 			return managed_interface::converter::convert<native_type, managed_type>(obj);                    \
 		}                                                                                                    \
 																											 \
 		template <typename U>                                                                                \
-		static auto from_mono(U obj) -> std::enable_if_t<std::is_same<U, MonoObject*>::value, native_type>   \
+		static auto from_managed(U obj) -> std::enable_if_t<std::is_same<U, MonoObject*>::value, native_type>   \
 		{                                                                                                    \
 			assert(check_type_layout<managed_type>(obj) && "Different type layouts");                        \
 			void* ptr = mono_object_unbox(obj);                                                              \
@@ -38,7 +38,7 @@ namespace managed_interface
 				*reinterpret_cast<managed_type*>(ptr));                                                      \
 		}                                                                                                    \
 		template <typename U>                                                                                \
-		static auto from_mono(const U& obj)                                                                  \
+		static auto from_managed(const U& obj)                                                                  \
 			-> std::enable_if_t<!std::is_same<U, MonoObject*>::value, native_type>                           \
 		{                                                                                                    \
 			return managed_interface::converter::convert<managed_type, native_type>(obj);                    \

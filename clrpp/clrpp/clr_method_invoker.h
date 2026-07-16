@@ -90,7 +90,7 @@ struct invoke_result
 		{
 			return {};
 		}
-		return clr_converter<std::decay_t<T>>::from_mono(storage);
+		return clr_converter<std::decay_t<T>>::from_managed(storage);
 	}
 };
 
@@ -112,9 +112,9 @@ struct invoke_result<T, managed_ptr>
 	{
 		if(v.kind != clr_variant::kind_object_handle || !v.data)
 		{
-			return clr_converter<std::decay_t<T>>::from_mono(managed_ptr{});
+			return clr_converter<std::decay_t<T>>::from_managed(managed_ptr{});
 		}
-		return clr_converter<std::decay_t<T>>::from_mono(managed_ptr::adopt(v.data));
+		return clr_converter<std::decay_t<T>>::from_managed(managed_ptr::adopt(v.data));
 	}
 };
 
@@ -128,7 +128,7 @@ struct variant_pack
 	int32_t count = static_cast<int32_t>(sizeof...(Args));
 
 	explicit variant_pack(Args... args)
-		: storage(clr_converter<std::decay_t<Args>>::to_mono(std::forward<Args>(args))...)
+		: storage(clr_converter<std::decay_t<Args>>::to_managed(std::forward<Args>(args))...)
 	{
 		fill(std::make_index_sequence<sizeof...(Args)>{});
 	}

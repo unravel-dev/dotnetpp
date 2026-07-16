@@ -22,7 +22,7 @@ auto clr_thunk_exception::message() const -> const std::string&
 	return info_.message;
 }
 
-auto clr_thunk_exception::soruce() const -> const std::string&
+auto clr_thunk_exception::source() const -> const std::string&
 {
 	return info_.source;
 }

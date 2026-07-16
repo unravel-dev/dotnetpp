@@ -2,6 +2,7 @@
 #include "clr_bridge_utils.h"
 #include "clr_exception.h"
 #include "clr_member_flags.h"
+#include "clr_member_meta.h"
 #include "clr_member_utils.h"
 
 #include <unordered_map>
@@ -11,14 +12,11 @@ namespace clr
 
 namespace
 {
-namespace ANONYMOUS
-{
 auto get_method_cache() -> std::unordered_map<clr_handle, std::shared_ptr<clr_method::meta_info>>&
 {
 	static std::unordered_map<clr_handle, std::shared_ptr<clr_method::meta_info>> cache;
 	return cache;
 }
-} // namespace ANONYMOUS
 } // namespace
 
 clr_method::clr_method(clr_handle method_handle)
@@ -57,7 +55,7 @@ clr_method::clr_method(const clr_type& type, const std::string& name, int argc)
 
 void clr_method::generate_meta()
 {
-	meta_ = get_or_create_meta<meta_info>(ANONYMOUS::get_method_cache(), method_,
+	meta_ = get_or_create_meta<meta_info>(get_method_cache(), method_,
 										  [this](meta_info& meta)
 										  {
 											  meta.name = take_string(bridge().method_get_name(method_));
@@ -95,17 +93,17 @@ auto clr_method::get_param_types() const -> const std::vector<clr_type>&
 
 auto clr_method::get_name() const -> std::string
 {
-	return meta_ ? meta_->name : std::string{};
+	return meta_name(meta_);
 }
 
 auto clr_method::get_fullname() const -> std::string
 {
-	return meta_ ? meta_->fullname : std::string{};
+	return meta_fullname(meta_);
 }
 
 auto clr_method::get_full_declname() const -> std::string
 {
-	return meta_ ? meta_->full_declname : std::string{};
+	return meta_full_declname(meta_);
 }
 
 auto clr_method::get_visibility() const -> visibility
@@ -173,7 +171,7 @@ auto clr_method::get_internal_ptr() const -> clr_handle
 
 void reset_method_cache()
 {
-	ANONYMOUS::get_method_cache().clear();
+	get_method_cache().clear();
 }
 
 } // namespace clr

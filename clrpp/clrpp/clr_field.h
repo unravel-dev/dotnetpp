@@ -3,12 +3,14 @@
 #include "clr_bridge.h"
 #include "clr_config.h"
 #include "clr_member_meta.h"
+#include "clr_object.h"
 #include "clr_type.h"
 #include "clr_visibility.h"
 
+#include <vector>
+
 namespace clr
 {
-class clr_object;
 
 class clr_field
 {
@@ -62,6 +64,8 @@ protected:
 
 struct clr_field::meta_info : clr_member_meta_info
 {
+	mutable std::vector<clr_object> attributes;
+	mutable bool attributes_cached = false;
 };
 
 void reset_field_cache();

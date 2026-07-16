@@ -428,12 +428,12 @@ struct mono_converter<mono_list<T>>
 	using native_type = mono_list<T>;
 	using managed_type = MonoObject*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj.get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		// mono_list has no default constructor; a null handle yields an
 		// invalid (but constructible) wrapper.
@@ -447,12 +447,12 @@ struct mono_converter<std::list<T>>
 	using native_type = std::list<T>;
 	using managed_type = MonoObject*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return mono_list<T>(obj).get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{

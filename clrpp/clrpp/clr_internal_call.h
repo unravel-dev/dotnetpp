@@ -3,6 +3,8 @@
 #include "clr_config.h"
 #include "clr_type_conversion.h"
 
+#include <type_traits>
+
 namespace clr
 {
 
@@ -106,12 +108,12 @@ struct icall_abi
 
 	static auto from_abi(const Managed& value) -> std::decay_t<T>
 	{
-		return clr_converter<std::decay_t<T>>::from_mono(value);
+		return clr_converter<std::decay_t<T>>::from_managed(value);
 	}
 
 	static auto to_abi(const std::decay_t<T>& value) -> Managed
 	{
-		return clr_converter<std::decay_t<T>>::to_mono(value);
+		return clr_converter<std::decay_t<T>>::to_managed(value);
 	}
 };
 
@@ -169,7 +171,7 @@ struct icall_abi<T*, Managed>
 
 	static auto from_abi(abi_type value) -> T*
 	{
-		return converter::from_mono(value);
+		return converter::from_managed(value);
 	}
 };
 
@@ -181,13 +183,13 @@ struct icall_abi<T, managed_ptr>
 
 	static auto from_abi(abi_type value) -> std::decay_t<T>
 	{
-		return clr_converter<std::decay_t<T>>::from_mono(managed_ptr::share(value));
+		return clr_converter<std::decay_t<T>>::from_managed(managed_ptr::share(value));
 	}
 
 	static auto to_abi(const std::decay_t<T>& value) -> abi_type
 	{
 		// Transfer ownership to the caller via a duplicated handle.
-		auto owned = clr_converter<std::decay_t<T>>::to_mono(value);
+		auto owned = clr_converter<std::decay_t<T>>::to_managed(value);
 		return duplicate_handle_for_transfer(owned);
 	}
 };
@@ -217,23 +219,40 @@ struct icall_abi<const std::string&, managed_ptr> : icall_abi<std::string, manag
 template <typename Signature, Signature& func>
 struct clr_internal_call_wrapper;
 
+template <typename T>
+struct icall_return_type
+{
+	using type = typename icall_abi<T>::abi_type;
+};
+
+template <>
+struct icall_return_type<void>
+{
+	using type = void;
+};
+
 // Returns travel by value (scalars widened, structs per the platform ABI).
+// Single specialization for void and non-void (tag-dispatched) so MSVC does
+// not see overlapping R(Args...) / void(Args...) partial specializations.
 template <typename R, typename... Args, R (&func)(Args...)>
 struct clr_internal_call_wrapper<R(Args...), func>
 {
-	static auto CLRPP_CALLTYPE wrapper(typename icall_abi<Args>::abi_type... args) ->
-		typename icall_abi<R>::abi_type
-	{
-		return icall_abi<R>::to_abi(func(icall_abi<Args>::from_abi(args)...));
-	}
-};
+	using return_type = typename icall_return_type<R>::type;
 
-template <typename... Args, void (&func)(Args...)>
-struct clr_internal_call_wrapper<void(Args...), func>
-{
-	static void CLRPP_CALLTYPE wrapper(typename icall_abi<Args>::abi_type... args)
+	static auto CLRPP_CALLTYPE wrapper(typename icall_abi<Args>::abi_type... args) -> return_type
+	{
+		return invoke(typename std::is_void<R>::type{}, args...);
+	}
+
+private:
+	static void invoke(std::true_type, typename icall_abi<Args>::abi_type... args)
 	{
 		func(icall_abi<Args>::from_abi(args)...);
+	}
+
+	static auto invoke(std::false_type, typename icall_abi<Args>::abi_type... args) -> return_type
+	{
+		return icall_abi<R>::to_abi(func(icall_abi<Args>::from_abi(args)...));
 	}
 };
 

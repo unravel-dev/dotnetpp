@@ -2,6 +2,16 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iterator>
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcharacter-conversion"
+#endif
+#include "utf8/unchecked.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -22,27 +32,24 @@ namespace clr
 namespace path_utils
 {
 
-namespace
-{
-
 #ifdef _WIN32
-auto to_wide_path(const std::string& utf8) -> std::wstring
+auto to_native_path(const std::string& utf8) -> std::wstring
 {
 	if(utf8.empty())
 	{
 		return {};
 	}
-	int needed = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
-	std::wstring result(static_cast<size_t>(needed > 0 ? needed - 1 : 0), L'\0');
-	if(needed > 1)
-	{
-		MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &result[0], needed);
-	}
-	return result;
+	std::u16string u16;
+	u16.reserve(utf8.size());
+	utf8::unchecked::utf8to16(utf8.begin(), utf8.end(), std::back_inserter(u16));
+	return std::wstring(u16.begin(), u16.end());
+}
+#else
+auto to_native_path(const std::string& utf8) -> std::string
+{
+	return utf8;
 }
 #endif
-
-} // namespace
 
 auto path_join(const std::string& a, const std::string& b) -> std::string
 {
@@ -61,7 +68,7 @@ auto path_join(const std::string& a, const std::string& b) -> std::string
 auto path_exists(const std::string& path) -> bool
 {
 #ifdef _WIN32
-	return ::GetFileAttributesW(to_wide_path(path).c_str()) != INVALID_FILE_ATTRIBUTES;
+	return ::GetFileAttributesW(to_native_path(path).c_str()) != INVALID_FILE_ATTRIBUTES;
 #else
 	struct stat st
 	{

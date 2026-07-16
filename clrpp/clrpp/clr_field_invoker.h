@@ -53,7 +53,7 @@ void clr_field_invoker<T>::set_value_impl(const clr_object* object, const T& val
 {
 	assert(field_);
 
-	auto managed_val = clr_converter<T>::to_mono(val);
+	auto managed_val = clr_converter<T>::to_managed(val);
 	auto variant = to_clr_variant(managed_val);
 
 	clr_handle target = (object && object->valid()) ? object->get_internal_ptr() : nullptr;

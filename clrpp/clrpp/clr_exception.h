@@ -28,7 +28,7 @@ public:
 
 	auto message() const -> const std::string&;
 
-	auto soruce() const -> const std::string&;
+	auto source() const -> const std::string&;
 
 	auto stacktrace() const -> const std::string&;
 

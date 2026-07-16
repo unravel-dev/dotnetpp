@@ -39,8 +39,6 @@ using char_t = char;
 
 namespace
 {
-namespace ANONYMOUS
-{
 using hostfxr_handle = void*;
 
 struct hostfxr_initialize_parameters
@@ -76,7 +74,7 @@ using load_assembly_and_get_function_pointer_fn = int32_t(CORECLR_DELEGATE_CALLT
 																					  void* reserved, void** delegate);
 
 const char_t* const UNMANAGEDCALLERSONLY_METHOD = reinterpret_cast<const char_t*>(-1);
-} // namespace ANONYMOUS
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -87,8 +85,8 @@ struct bridge_state
 	bridge_detail::exports table{};
 
 	void* hostfxr_lib = nullptr;
-	ANONYMOUS::hostfxr_close_fn close_fn = nullptr;
-	ANONYMOUS::hostfxr_handle context = nullptr;
+	hostfxr_close_fn close_fn = nullptr;
+	hostfxr_handle context = nullptr;
 
 	std::string managed_assembly_path;
 	std::string dotnet_root;
@@ -105,32 +103,10 @@ auto state() -> bridge_state&
 // Helpers
 // ---------------------------------------------------------------------------
 
-#ifdef _WIN32
-auto to_char_t(const std::string& utf8) -> std::wstring
-{
-	if(utf8.empty())
-	{
-		return {};
-	}
-	int needed = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
-	std::wstring result(static_cast<size_t>(needed > 0 ? needed - 1 : 0), L'\0');
-	if(needed > 1)
-	{
-		MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &result[0], needed);
-	}
-	return result;
-}
-#else
-auto to_char_t(const std::string& utf8) -> std::string
-{
-	return utf8;
-}
-#endif
-
 auto load_library(const std::string& path) -> void*
 {
 #ifdef _WIN32
-	return reinterpret_cast<void*>(LoadLibraryW(to_char_t(path).c_str()));
+	return reinterpret_cast<void*>(LoadLibraryW(path_utils::to_native_path(path).c_str()));
 #else
 	return dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
 #endif
@@ -144,19 +120,6 @@ auto get_symbol(void* lib, const char* name) -> void*
 	return dlsym(lib, name);
 #endif
 }
-
-// void unload_library(void* lib)
-// {
-// 	if(!lib)
-// 	{
-// 		return;
-// 	}
-// #ifdef _WIN32
-// 	FreeLibrary(reinterpret_cast<HMODULE>(lib));
-// #else
-// 	dlclose(lib);
-// #endif
-// }
 
 auto hostfxr_library_name() -> std::string
 {
@@ -438,11 +401,11 @@ auto initialize(const std::string& assembly_dir,
 		return false;
 	}
 
-	auto init_fn = reinterpret_cast<ANONYMOUS::hostfxr_initialize_for_runtime_config_fn>(
+	auto init_fn = reinterpret_cast<hostfxr_initialize_for_runtime_config_fn>(
 		get_symbol(s.hostfxr_lib, "hostfxr_initialize_for_runtime_config"));
-	auto get_delegate_fn = reinterpret_cast<ANONYMOUS::hostfxr_get_runtime_delegate_fn>(
+	auto get_delegate_fn = reinterpret_cast<hostfxr_get_runtime_delegate_fn>(
 		get_symbol(s.hostfxr_lib, "hostfxr_get_runtime_delegate"));
-	s.close_fn = reinterpret_cast<ANONYMOUS::hostfxr_close_fn>(get_symbol(s.hostfxr_lib, "hostfxr_close"));
+	s.close_fn = reinterpret_cast<hostfxr_close_fn>(get_symbol(s.hostfxr_lib, "hostfxr_close"));
 
 	if(!init_fn || !get_delegate_fn || !s.close_fn)
 	{
@@ -451,7 +414,7 @@ auto initialize(const std::string& assembly_dir,
 	}
 
 	// -- initialize the runtime --------------------------------------------
-	auto config_path = to_char_t(runtimeconfig);
+	auto config_path = path_utils::to_native_path(runtimeconfig);
 
 	// Only pass explicit parameters when the caller overrides the dotnet
 	// root; otherwise let hostfxr use its own detection. Note: the root must
@@ -461,10 +424,10 @@ auto initialize(const std::string& assembly_dir,
 #ifdef _WIN32
 	std::replace(normalized_root.begin(), normalized_root.end(), '/', '\\');
 #endif
-	auto root_path = to_char_t(normalized_root);
-	auto host_path = to_char_t(path_utils::current_executable_path());
+	auto root_path = path_utils::to_native_path(normalized_root);
+	auto host_path = path_utils::to_native_path(path_utils::current_executable_path());
 
-	ANONYMOUS::hostfxr_initialize_parameters params{};
+	hostfxr_initialize_parameters params{};
 	params.size = sizeof(params);
 	params.host_path = host_path.empty() ? nullptr : host_path.c_str();
 	params.dotnet_root = root_path.c_str();
@@ -482,7 +445,7 @@ auto initialize(const std::string& assembly_dir,
 	}
 
 	void* load_assembly_ptr = nullptr;
-	rc = get_delegate_fn(s.context, ANONYMOUS::hdt_load_assembly_and_get_function_pointer, &load_assembly_ptr);
+	rc = get_delegate_fn(s.context, hdt_load_assembly_and_get_function_pointer, &load_assembly_ptr);
 	if(rc != 0 || !load_assembly_ptr)
 	{
 		log_message("clrpp: failed to acquire load_assembly_and_get_function_pointer", "error");
@@ -490,18 +453,18 @@ auto initialize(const std::string& assembly_dir,
 	}
 
 	auto load_assembly_and_get_fn =
-		reinterpret_cast<ANONYMOUS::load_assembly_and_get_function_pointer_fn>(load_assembly_ptr);
+		reinterpret_cast<load_assembly_and_get_function_pointer_fn>(load_assembly_ptr);
 
 	// -- bootstrap the export table ----------------------------------------
 	using bootstrap_fn = int32_t(CLRPP_CALLTYPE*)(void**, int32_t);
 	bootstrap_fn bootstrap = nullptr;
 
-	auto dll_path = to_char_t(managed_dll);
-	auto type_name = to_char_t("Clrpp.Bridge, Clrpp.Managed");
-	auto method_name = to_char_t("Bootstrap");
+	auto dll_path = path_utils::to_native_path(managed_dll);
+	auto type_name = path_utils::to_native_path("Clrpp.Bridge, Clrpp.Managed");
+	auto method_name = path_utils::to_native_path("Bootstrap");
 
 	rc = load_assembly_and_get_fn(dll_path.c_str(), type_name.c_str(), method_name.c_str(),
-								  ANONYMOUS::UNMANAGEDCALLERSONLY_METHOD, nullptr,
+								  UNMANAGEDCALLERSONLY_METHOD, nullptr,
 								  reinterpret_cast<void**>(&bootstrap));
 	if(rc != 0 || !bootstrap)
 	{

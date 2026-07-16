@@ -390,12 +390,12 @@ struct mono_converter<mono_array<T>>
 	using native_type = mono_array<T>;
 	using managed_type = MonoObject*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj.get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{
@@ -411,12 +411,12 @@ struct mono_converter<std::vector<T>>
 	using native_type = std::vector<T>;
 	using managed_type = MonoObject*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return mono_array<T>(obj).get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{

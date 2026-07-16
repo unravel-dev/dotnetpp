@@ -4,7 +4,6 @@
 #include "clr_member_flags.h"
 #include "clr_member_utils.h"
 #include "clr_method.h"
-#include "clr_object.h"
 
 #include <unordered_map>
 
@@ -13,14 +12,11 @@ namespace clr
 
 namespace
 {
-namespace ANONYMOUS
-{
 auto get_property_cache() -> std::unordered_map<clr_handle, std::shared_ptr<clr_property::meta_info>>&
 {
 	static std::unordered_map<clr_handle, std::shared_ptr<clr_property::meta_info>> cache;
 	return cache;
 }
-} // namespace ANONYMOUS
 } // namespace
 
 clr_property::clr_property(clr_handle property_handle)
@@ -48,7 +44,7 @@ clr_property::clr_property(const clr_type& type, const std::string& name)
 
 void clr_property::generate_meta(const clr_type& declaring_type)
 {
-	meta_ = get_or_create_meta<meta_info>(ANONYMOUS::get_property_cache(), property_,
+	meta_ = get_or_create_meta<meta_info>(get_property_cache(), property_,
 										  [&](meta_info& meta)
 										  {
 											  meta.name = take_string(bridge().property_get_name(property_));
@@ -60,17 +56,17 @@ void clr_property::generate_meta(const clr_type& declaring_type)
 
 auto clr_property::get_name() const -> std::string
 {
-	return meta_ ? meta_->name : std::string{};
+	return meta_name(meta_);
 }
 
 auto clr_property::get_fullname() const -> std::string
 {
-	return meta_ ? meta_->fullname : std::string{};
+	return meta_fullname(meta_);
 }
 
 auto clr_property::get_full_declname() const -> std::string
 {
-	return meta_ ? meta_->full_declname : std::string{};
+	return meta_full_declname(meta_);
 }
 
 auto clr_property::get_type() const -> const clr_type&
@@ -115,14 +111,18 @@ auto clr_property::is_readonly() const -> bool
 
 auto clr_property::get_attributes() const -> std::vector<clr_object>
 {
-	if(!property_)
+	if(!property_ || !meta_)
 	{
 		return {};
 	}
-
-	return fetch_managed_objects(
-		[this](clr_handle* buffer, int32_t count)
-		{ return bridge().property_get_attributes(property_, buffer, count); });
+	if(!meta_->attributes_cached)
+	{
+		meta_->attributes = fetch_managed_objects(
+			[this](clr_handle* buffer, int32_t count)
+			{ return bridge().property_get_attributes(property_, buffer, count); });
+		meta_->attributes_cached = true;
+	}
+	return meta_->attributes;
 }
 
 auto clr_property::has_attribute_fullname(const std::string& attribute_full_name) const -> bool
@@ -162,7 +162,7 @@ auto clr_property::get_internal_ptr() const -> clr_handle
 
 void reset_property_cache()
 {
-	ANONYMOUS::get_property_cache().clear();
+	get_property_cache().clear();
 }
 
 } // namespace clr

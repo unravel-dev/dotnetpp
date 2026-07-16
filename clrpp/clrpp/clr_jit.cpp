@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 namespace clr
@@ -16,10 +17,7 @@ namespace clr
 
 namespace
 {
-namespace ANONYMOUS
-{
-compiler_paths* comp_paths = nullptr;
-} // namespace ANONYMOUS
+std::unique_ptr<compiler_paths> g_comp_paths;
 
 /*
  * Directory with the framework reference assemblies
@@ -28,9 +26,9 @@ compiler_paths* comp_paths = nullptr;
  */
 auto find_reference_assemblies_dir() -> std::string
 {
-	if(ANONYMOUS::comp_paths && !ANONYMOUS::comp_paths->reference_assemblies_dir.empty())
+	if(g_comp_paths && !g_comp_paths->reference_assemblies_dir.empty())
 	{
-		return ANONYMOUS::comp_paths->reference_assemblies_dir;
+		return g_comp_paths->reference_assemblies_dir;
 	}
 
 	// Compile against the same TFM the bridge / shipped runtime target
@@ -72,9 +70,9 @@ auto find_reference_assemblies_dir() -> std::string
 
 auto clr_dotnet_executable() -> std::string
 {
-	if(ANONYMOUS::comp_paths && !ANONYMOUS::comp_paths->msc_executable.empty())
+	if(g_comp_paths && !g_comp_paths->msc_executable.empty())
 	{
-		return ANONYMOUS::comp_paths->msc_executable;
+		return g_comp_paths->msc_executable;
 	}
 
 	const auto& root = bridge_detail::dotnet_root();
@@ -93,7 +91,7 @@ auto clr_dotnet_executable() -> std::string
 	return "dotnet";
 }
 
-/// Locate the Roslyn compiler shipped with the newest installed SDK.
+/// Locate the Roslyn compiler shipped with the preferred / newest SDK.
 auto find_csc_dll() -> std::string
 {
 	std::vector<std::string> roots;
@@ -106,18 +104,19 @@ auto find_csc_dll() -> std::string
 		roots.push_back(path);
 	}
 
+	const auto preferred = path_utils::parse_version(get_dotnet_version());
 	for(const auto& root : roots)
 	{
 		auto sdk_dir = root + "/sdk";
-		auto versions = path_utils::list_subdirectories(sdk_dir);
-		std::sort(versions.rbegin(), versions.rend()); // highest version first
-		for(const auto& version : versions)
+		auto version = path_utils::pick_highest_version_subdir(sdk_dir, preferred);
+		if(version.empty())
 		{
-			auto csc = sdk_dir + "/" + version + "/Roslyn/bincore/csc.dll";
-			if(path_utils::path_exists(csc))
-			{
-				return csc;
-			}
+			continue;
+		}
+		auto csc = sdk_dir + "/" + version + "/Roslyn/bincore/csc.dll";
+		if(path_utils::path_exists(csc))
+		{
+			return csc;
 		}
 	}
 	return {};
@@ -167,22 +166,25 @@ auto framework_references() -> const std::vector<std::string>&
 	return refs;
 }
 
-/// csc-style option list shared by all command flavors.
-auto build_csc_args(const compiler_params& params) -> std::vector<std::string>
+enum class csc_arg_style
 {
+	command_line, // -reference:path
+	response_file // -r:path (and quoted where needed)
+};
+
+/// Shared csc option list for command-line and .rsp flavors.
+auto build_csc_args(const compiler_params& params, csc_arg_style style) -> std::vector<std::string>
+{
+	const bool rsp = style == csc_arg_style::response_file;
+	const char* reference_prefix = rsp ? "-r:" : "-reference:";
+
 	std::vector<std::string> args;
 	args.emplace_back("-nologo");
 	args.emplace_back("-nostdlib+");
 
-	// csc has no implicit standard library - reference the framework pack.
 	for(const auto& ref : framework_references())
 	{
-		args.emplace_back("-reference:" + ref);
-	}
-
-	for(const auto& path : params.files)
-	{
-		args.emplace_back(path);
+		args.emplace_back(std::string(reference_prefix) + (rsp ? quote_if_needed(ref) : ref));
 	}
 
 	if(!params.output_type.empty())
@@ -190,28 +192,21 @@ auto build_csc_args(const compiler_params& params) -> std::vector<std::string>
 		args.emplace_back("-target:" + params.output_type);
 	}
 
-	if(!params.references.empty())
+	if(!params.output_name.empty())
 	{
-		std::string arg = "-reference:";
-		for(const auto& ref : params.references)
-		{
-			arg += ref;
-			arg += ",";
-		}
-		arg.pop_back();
-		args.emplace_back(arg);
+		args.emplace_back("-out:" + (rsp ? quote_if_needed(params.output_name) : params.output_name));
 	}
 
-	if(!params.references_locations.empty())
+	if(!params.output_doc_name.empty())
 	{
-		std::string arg = "-lib:";
-		for(const auto& loc : params.references_locations)
-		{
-			arg += loc;
-			arg += ",";
-		}
-		arg.pop_back();
-		args.emplace_back(arg);
+		args.emplace_back("-doc:" + (rsp ? quote_if_needed(params.output_doc_name) : params.output_doc_name));
+	}
+
+	args.emplace_back(params.debug ? "-debug:portable" : "-optimize");
+
+	if(params.unsafe)
+	{
+		args.emplace_back("-unsafe");
 	}
 
 	for(const auto& define : params.defines)
@@ -219,82 +214,85 @@ auto build_csc_args(const compiler_params& params) -> std::vector<std::string>
 		args.emplace_back("-define:" + define);
 	}
 
-	if(!params.output_doc_name.empty())
+	if(!params.references_locations.empty())
 	{
-		args.emplace_back("-doc:" + params.output_doc_name);
+		std::string arg = "-lib:";
+		for(size_t i = 0; i < params.references_locations.size(); ++i)
+		{
+			if(i)
+			{
+				arg += ",";
+			}
+			arg += rsp ? quote_if_needed(params.references_locations[i]) : params.references_locations[i];
+		}
+		args.emplace_back(arg);
 	}
 
-	if(params.debug)
+	if(!params.references.empty())
 	{
-		args.emplace_back("-debug:portable");
-	}
-	else
-	{
-		args.emplace_back("-optimize");
+		if(rsp)
+		{
+			for(const auto& ref : params.references)
+			{
+				args.emplace_back(std::string(reference_prefix) + quote_if_needed(ref));
+			}
+		}
+		else
+		{
+			std::string arg = "-reference:";
+			for(size_t i = 0; i < params.references.size(); ++i)
+			{
+				if(i)
+				{
+					arg += ",";
+				}
+				arg += params.references[i];
+			}
+			args.emplace_back(arg);
+		}
 	}
 
-	if(params.unsafe)
+	for(const auto& path : params.files)
 	{
-		args.emplace_back("-unsafe");
+		args.emplace_back(rsp ? quote_if_needed(path) : path);
 	}
-
-	args.emplace_back("-out:" + params.output_name);
 
 	return args;
 }
 
-} // namespace
-
-auto get_common_library_names() -> const std::vector<std::string>&
+/// Resolve `dotnet exec csc.dll` (or a bare `csc` fallback).
+auto make_csc_command() -> compile_cmd
 {
+	compile_cmd cmd;
+	cmd.cmd = clr_dotnet_executable();
+
+	auto csc = find_csc_dll();
+	if(!csc.empty())
+	{
+		cmd.args.emplace_back("exec");
+		cmd.args.emplace_back(csc);
+	}
+	else
+	{
+		cmd.cmd = "csc";
+	}
+	return cmd;
+}
+
+auto join_command(const compile_cmd& detailed) -> std::string
+{
+	std::string command = quote(detailed.cmd);
+	for(const auto& arg : detailed.args)
+	{
+		command += " ";
+		command += quote_if_needed(arg);
+	}
 #ifdef _WIN32
-	static const std::vector<std::string> names{"hostfxr", "coreclr"};
-#else
-	static const std::vector<std::string> names{"libhostfxr", "libcoreclr"};
+	command = quote(command);
 #endif
-	return names;
+	return command;
 }
 
-auto get_common_library_names_for_deploy() -> const std::vector<std::string>&
-{
-	// The runtime is resolved from the installed dotnet root; nothing to deploy.
-	static const std::vector<std::string> names{};
-	return names;
-}
-
-auto get_common_library_paths() -> const std::vector<std::string>&
-{
-	static const std::vector<std::string> paths{"C:/Program Files/dotnet", "/usr/share/dotnet",
-												"/usr/lib/dotnet", "/usr/local/share/dotnet",
-												"/opt/dotnet"};
-	return paths;
-}
-
-auto get_common_config_paths() -> const std::vector<std::string>&
-{
-	static const std::vector<std::string> paths{"C:/Program Files/dotnet", "/usr/share/dotnet",
-												"/usr/lib/dotnet", "/usr/local/share/dotnet",
-												"/opt/dotnet"};
-	return paths;
-}
-
-auto get_common_executable_names() -> const std::vector<std::string>&
-{
-#ifdef _WIN32
-	static const std::vector<std::string> names{"dotnet.exe"};
-#else
-	static const std::vector<std::string> names{"dotnet"};
-#endif
-	return names;
-}
-
-auto get_common_executable_paths() -> const std::vector<std::string>&
-{
-	return get_common_library_paths();
-}
-
-namespace
-{
 /*
  * Translate interpreter_config into the runtime's environment switches.
  * Must run before hostfxr/coreclr are loaded - the runtime samples these
@@ -324,10 +322,55 @@ void apply_interpreter_config(const interpreter_config& interp)
 }
 } // namespace
 
+auto get_common_library_names() -> const std::vector<std::string>&
+{
+#ifdef _WIN32
+	static const std::vector<std::string> names{"hostfxr", "coreclr"};
+#else
+	static const std::vector<std::string> names{"libhostfxr", "libcoreclr"};
+#endif
+	return names;
+}
+
+auto get_common_library_names_for_deploy() -> const std::vector<std::string>&
+{
+	// The runtime is resolved from the installed dotnet root; nothing to deploy.
+	static const std::vector<std::string> names{};
+	return names;
+}
+
+auto get_common_library_paths() -> const std::vector<std::string>&
+{
+	static const std::vector<std::string> paths{"C:/Program Files/dotnet", "/usr/share/dotnet",
+												"/usr/lib/dotnet", "/usr/local/share/dotnet",
+												"/opt/dotnet"};
+	return paths;
+}
+
+auto get_common_config_paths() -> const std::vector<std::string>&
+{
+	return get_common_library_paths();
+}
+
+auto get_common_executable_names() -> const std::vector<std::string>&
+{
+#ifdef _WIN32
+	static const std::vector<std::string> names{"dotnet.exe"};
+#else
+	static const std::vector<std::string> names{"dotnet"};
+#endif
+	return names;
+}
+
+auto get_common_executable_paths() -> const std::vector<std::string>&
+{
+	return get_common_library_paths();
+}
+
 auto init(const compiler_paths& paths, const debugging_config& debugging, const interpreter_config& interpreter)
 	-> bool
 {
-	ANONYMOUS::comp_paths = new compiler_paths(paths);
+	g_comp_paths = std::make_unique<compiler_paths>(paths);
 
 	set_log_handler("default", [](const std::string& msg) { std::cout << msg << std::endl; });
 
@@ -363,142 +406,42 @@ auto get_dotnet_version() -> const std::string&
 void shutdown()
 {
 	bridge_detail::terminate();
-
-	delete ANONYMOUS::comp_paths;
-	ANONYMOUS::comp_paths = nullptr;
+	g_comp_paths.reset();
 }
 
 auto create_compile_command(const compiler_params& params) -> std::string
 {
-	auto detailed = create_compile_command_detailed(params);
-
-	std::string command = quote(detailed.cmd);
-	for(const auto& arg : detailed.args)
-	{
-		command += " ";
-		command += quote_if_needed(arg);
-	}
-
-#ifdef _WIN32
-	command = quote(command);
-#endif
-	return command;
+	return join_command(create_compile_command_detailed(params));
 }
 
 auto create_compile_command_detailed(const compiler_params& params) -> compile_cmd
 {
-	compile_cmd cmd;
-	cmd.cmd = clr_dotnet_executable();
-
-	auto csc = find_csc_dll();
-	if(!csc.empty())
-	{
-		cmd.args.emplace_back("exec");
-		cmd.args.emplace_back(csc);
-	}
-	else
-	{
-		// Fall back to hoping a csc shim exists on PATH.
-		cmd.cmd = "csc";
-	}
-
-	for(auto& arg : build_csc_args(params))
+	auto cmd = make_csc_command();
+	for(auto& arg : build_csc_args(params, csc_arg_style::command_line))
 	{
 		cmd.args.emplace_back(std::move(arg));
 	}
-
 	return cmd;
 }
 
 auto create_compile_rsp(const compiler_params& p) -> std::string
 {
 	std::ostringstream rsp;
-
-	rsp << "-nologo\n";
-	rsp << "-nostdlib+\n";
-
-	for(const auto& ref : framework_references())
+	for(const auto& arg : build_csc_args(p, csc_arg_style::response_file))
 	{
-		rsp << "-r:" << quote_if_needed(ref) << "\n";
+		rsp << arg << "\n";
 	}
-
-	if(!p.output_type.empty())
-	{
-		rsp << "-target:" << p.output_type << "\n";
-	}
-
-	if(!p.output_name.empty())
-	{
-		rsp << "-out:" << quote_if_needed(p.output_name) << "\n";
-	}
-
-	if(!p.output_doc_name.empty())
-	{
-		rsp << "-doc:" << quote_if_needed(p.output_doc_name) << "\n";
-	}
-
-	rsp << (p.debug ? "-debug:portable\n" : "-optimize\n");
-	if(p.unsafe)
-	{
-		rsp << "-unsafe\n";
-	}
-
-	for(const auto& define : p.defines)
-	{
-		rsp << "-define:" << define << "\n";
-	}
-
-	if(!p.references_locations.empty())
-	{
-		rsp << "-lib:";
-		for(size_t i = 0; i < p.references_locations.size(); ++i)
-		{
-			if(i)
-			{
-				rsp << ",";
-			}
-			rsp << quote_if_needed(p.references_locations[i]);
-		}
-		rsp << "\n";
-	}
-
-	for(const auto& ref : p.references)
-	{
-		rsp << "-r:" << quote_if_needed(ref) << "\n";
-	}
-
-	for(const auto& file : p.files)
-	{
-		rsp << quote_if_needed(file) << "\n";
-	}
-
 	return rsp.str();
 }
 
 auto create_compile_command_detailed_rsp(const compiler_params& p, const std::string& rsp_file)
 	-> compile_cmd
 {
-	compile_cmd cmd;
-	cmd.cmd = clr_dotnet_executable();
-
-	auto csc = find_csc_dll();
-	if(!csc.empty())
+	auto cmd = make_csc_command();
 	{
-		cmd.args.emplace_back("exec");
-		cmd.args.emplace_back(csc);
-	}
-	else
-	{
-		cmd.cmd = "csc";
-	}
-
-	{
-		auto rsp = create_compile_rsp(p);
-
 		std::ofstream rsp_file_stream(rsp_file);
-		rsp_file_stream << rsp;
+		rsp_file_stream << create_compile_rsp(p);
 	}
-
 	cmd.args.emplace_back("@" + quote_if_needed(rsp_file));
 	return cmd;
 }
@@ -509,17 +452,7 @@ auto compile(const compiler_params& params) -> bool
 	auto rsp_file = params.output_name + ".rsp";
 	auto detailed = create_compile_command_detailed_rsp(params, rsp_file);
 
-	std::string command = quote(detailed.cmd);
-	for(const auto& arg : detailed.args)
-	{
-		command += " ";
-		command += quote_if_needed(arg);
-	}
-
-#ifdef _WIN32
-	command = quote(command);
-#endif
-
+	std::string command = join_command(detailed);
 	std::cout << command << std::endl;
 	auto result = std::system(command.c_str()) == 0;
 	std::remove(rsp_file.c_str());

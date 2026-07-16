@@ -362,7 +362,7 @@ private:
 		}
 		managed_element_type managed{};
 		std::memcpy(std::addressof(managed), src, sizeof(managed_element_type));
-		return clr_converter<T>::from_mono(managed);
+		return clr_converter<T>::from_managed(managed);
 	}
 
 	void write_element_at(char* dest, const T& value, std::true_type /*direct*/) const
@@ -380,7 +380,7 @@ private:
 		{
 			throw clr_exception("NATIVE::array managed element size mismatch");
 		}
-		managed_element_type managed = clr_converter<T>::to_mono(value);
+		managed_element_type managed = clr_converter<T>::to_managed(value);
 		std::memcpy(dest, std::addressof(managed), sizeof(managed_element_type));
 	}
 
@@ -405,7 +405,7 @@ private:
 		{
 			return T{};
 		}
-		return clr_converter<T>::from_mono(managed_ptr::adopt(result.data));
+		return clr_converter<T>::from_managed(managed_ptr::adopt(result.data));
 	}
 
 	auto get_via_bridge(size_t index, std::integral_constant<int, 2> /*converted*/) const -> T
@@ -420,7 +420,7 @@ private:
 		bridge().array_get_element(get_internal_ptr(), static_cast<int64_t>(index), &result, &ex);
 		throw_if_exception(ex);
 
-		return clr_converter<T>::from_mono(managed);
+		return clr_converter<T>::from_managed(managed);
 	}
 
 	void set_via_bridge(size_t index, const T& value, std::integral_constant<int, 0> /*direct*/)
@@ -431,7 +431,7 @@ private:
 
 	void set_via_bridge(size_t index, const T& value, std::integral_constant<int, 1> /*handle*/)
 	{
-		auto handle = clr_converter<T>::to_mono(value);
+		auto handle = clr_converter<T>::to_managed(value);
 		auto variant = to_clr_variant(handle);
 
 		clr_exception_info_raw ex{};
@@ -441,7 +441,7 @@ private:
 
 	void set_via_bridge(size_t index, const T& value, std::integral_constant<int, 2> /*converted*/)
 	{
-		managed_element_type managed = clr_converter<T>::to_mono(value);
+		managed_element_type managed = clr_converter<T>::to_managed(value);
 		clr_variant variant{};
 		variant.kind = clr_variant::kind_blob;
 		variant.size = static_cast<int32_t>(sizeof(managed_element_type));
@@ -607,12 +607,12 @@ struct clr_converter<clr_array<T>>
 	using native_type = clr_array<T>;
 	using managed_type = managed_ptr;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj.get_managed_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{
@@ -628,12 +628,12 @@ struct clr_converter<std::vector<T>>
 	using native_type = std::vector<T>;
 	using managed_type = managed_ptr;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return clr_array<T>(obj).get_managed_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{

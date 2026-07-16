@@ -15,15 +15,15 @@
  * Alias templates cannot be specialized, so custom conversions must
  * specialize the backend template. Use the macro below so the code stays
  * backend agnostic. Both backends share the same converter protocol
- * (to_mono/from_mono, where "mono" reads as "managed"):
+ * (to_managed/from_managed, where "mono" reads as "managed"):
  *
  *   template <>
  *   struct dotnet_converter<my_type>
  *   {
  *       using native_type = my_type;
  *       using managed_type = dotnet::managed_ptr;
- *       static auto to_mono(const native_type&) -> managed_type;
- *       static auto from_mono(const managed_type&) -> native_type;
+ *       static auto to_managed(const native_type&) -> managed_type;
+ *       static auto from_managed(const managed_type&) -> native_type;
  *   };
  *
  * For layout-compatible POD pairs, specialize converter inside

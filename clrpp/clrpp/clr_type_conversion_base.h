@@ -36,13 +36,13 @@ struct clr_converter
 
 	static_assert(is_clr_valuetype<managed_type>::value, "Specialize converter for non-value types");
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj;
 	}
 
 	// Unbox from a managed object handle (invoker result path).
-	static auto from_mono(const managed_ptr& obj) -> native_type
+	static auto from_managed(const managed_ptr& obj) -> native_type
 	{
 		assert(check_type_layout<managed_type>(obj) && "Different type layouts");
 		native_type value{};
@@ -52,7 +52,7 @@ struct clr_converter
 
 	// Pass-through (internal call argument path).
 	template <typename U>
-	static auto from_mono(const U& obj)
+	static auto from_managed(const U& obj)
 		-> std::enable_if_t<!std::is_same<U, managed_ptr>::value && !std::is_pointer<U>::value,
 							const native_type&>
 	{
@@ -60,7 +60,7 @@ struct clr_converter
 	}
 
 	template <typename U>
-	static auto from_mono(const U& ptr)
+	static auto from_managed(const U& ptr)
 		-> std::enable_if_t<!std::is_same<U, managed_ptr>::value && std::is_pointer<U>::value, native_type*>
 	{
 		return reinterpret_cast<native_type*>(ptr);

@@ -249,7 +249,7 @@ public static partial class Bridge
             var keys = LongLivedPins.Keys.ToArray();
             if (keys.Length > 0)
             {
-                Log($"releasing {keys.Length} long-lived array pin(s) before domain unload", "debug");
+                Log($"releasing {keys.Length} long-lived array pin(s) before domain unload", "trace");
             }
 
             foreach (var key in keys)

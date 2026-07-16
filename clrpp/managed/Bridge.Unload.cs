@@ -58,7 +58,7 @@ public static partial class Bridge
 
             if (!weak.IsAlive)
             {
-                Log($"domain '{name}' unloaded cleanly", "debug");
+                Log($"domain '{name}' unloaded cleanly", "trace");
                 return 0;
             }
 
@@ -290,7 +290,7 @@ public static partial class Bridge
     {
         if (!weak.IsAlive)
         {
-            Log($"domain '{name}' unloaded cleanly (collected during diagnosis)", "debug");
+            Log($"domain '{name}' unloaded cleanly (collected during diagnosis)", "trace");
             return;
         }
 

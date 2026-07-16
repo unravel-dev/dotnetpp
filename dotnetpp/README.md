@@ -10,8 +10,8 @@ of one of two backends, selected at compile time:
 Select the backend with the CMake cache variable:
 
 ```
-cmake -DDOTNETPP_BACKEND=mono    ...   # default
-cmake -DDOTNETPP_BACKEND=coreclr ...
+cmake -DDOTNETPP_BACKEND=coreclr ...   # default
+cmake -DDOTNETPP_BACKEND=mono    ...
 ```
 
 The native C++ surface (domains, assemblies, types, method/field/property
@@ -29,8 +29,7 @@ backend template through a macro that works on both backends:
 dotnet_register_converter_for_pod(my_vec2, managed_vec2);
 ```
 
-Both backends share the `to_mono`/`from_mono` protocol names (read "mono" as
-"managed").
+Both backends share the `to_managed` / `from_managed` converter protocol.
 
 ## Semantic differences between the backends
 
@@ -99,32 +98,22 @@ extern constructors) compile and run unchanged.
   object references - those cannot cross by raw copy) are skipped with a
   warning and fail at invocation time, exactly as an unwoven extern would.
 
-### CoreCLR interpreter preparation (`interpreter_config`)
+### CoreCLR / Mono interpreter (`interpreter_config`)
 
-`clr::init` (and `dotnet::init`) take an optional `interpreter_config` that
-prepares the process for CoreCLR's experimental interpreter - the
-"interpreter + R2R" execution model intended for JIT-restricted platforms
-(iOS). The config maps onto the runtime's environment switches, which must be
-set before the runtime loads:
+`dotnet::init` takes an optional `interpreter_config` applied before the
+runtime loads. Pre-existing `DOTNET_*` / process env values are never
+overridden.
 
-| mode               | effect                                                        |
-| ------------------ | ------------------------------------------------------------- |
-| `disabled`         | nothing set; JIT/R2R as usual (default)                       |
-| `opt_in`           | `DOTNET_Interpreter=<filter>` (e.g. `MyAssembly!*`)           |
-| `prefer_compiled`  | `DOTNET_InterpMode=1` - interpret all except R2R + corelib    |
-| `interpret_all`    | `DOTNET_InterpMode=2` - interpret all except intrinsics       |
-| `interpreter_only` | `DOTNET_InterpMode=3` - no JIT/R2R fallback at all            |
+| mode | effect |
+| ---- | ------ |
+| `automatic` (default) | leave the environment alone |
+| `forced` | CoreCLR: `DOTNET_InterpMode=1`; Mono: pass `--interpreter` to `mono_jit_init` |
 
-Any non-disabled mode also sets `DOTNET_TieredCompilation=0` (tiering can
-replace interpreter code behind its back). Values already present in the
-environment are never overridden, so external experiments keep priority.
-
-Shipped release runtimes do not include the interpreter yet
-(`FEATURE_INTERPRETER` is limited to Debug/Checked CoreCLR builds), so the
-switches are inert there. To exercise the interpreter today, point
-`DOTNET_ROOT` at a checked dotnet/runtime build and pass
-`mode::prefer_compiled`. The mono backend accepts the same struct and
-ignores it.
+Use `forced` only to exercise the interpreter on a JIT-capable desktop
+runtime. On no-JIT packs (e.g. iOS) the runtime enables the interpreter
+itself — leave `automatic`. Shipped release CoreCLR builds may not include
+`FEATURE_INTERPRETER`; the switch is then inert unless you point at a
+checked runtime.
 
 ### Domains
 

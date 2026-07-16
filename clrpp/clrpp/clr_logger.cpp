@@ -11,6 +11,13 @@ auto get_handlers() -> std::map<std::string, log_handler>&
 	static std::map<std::string, log_handler> handlers;
 	return handlers;
 }
+
+auto find_handler(const std::string& category) -> const log_handler*
+{
+	auto& handlers = get_handlers();
+	auto it = handlers.find(category);
+	return it != handlers.end() ? &it->second : nullptr;
+}
 } // namespace
 
 void set_log_handler(const std::string& category, const log_handler& handler)
@@ -20,7 +27,9 @@ void set_log_handler(const std::string& category, const log_handler& handler)
 
 auto get_log_handler(const std::string& category) -> const log_handler&
 {
-	return get_handlers()[category];
+	static const log_handler empty{};
+	auto* handler = find_handler(category);
+	return handler ? *handler : empty;
 }
 
 void log_message(const std::string& message, const std::string& category)

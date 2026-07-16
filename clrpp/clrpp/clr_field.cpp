@@ -55,17 +55,17 @@ void clr_field::generate_meta(const clr_type& declaring_type)
 
 auto clr_field::get_name() const -> std::string
 {
-	return meta_ ? meta_->name : std::string{};
+	return meta_name(meta_);
 }
 
 auto clr_field::get_fullname() const -> std::string
 {
-	return meta_ ? meta_->fullname : std::string{};
+	return meta_fullname(meta_);
 }
 
 auto clr_field::get_full_declname() const -> std::string
 {
-	return meta_ ? meta_->full_declname : std::string{};
+	return meta_full_declname(meta_);
 }
 
 auto clr_field::get_type() const -> const clr_type&
@@ -85,14 +85,18 @@ auto clr_field::is_static() const -> bool
 
 auto clr_field::get_attributes() const -> std::vector<clr_object>
 {
-	if(!field_)
+	if(!field_ || !meta_)
 	{
 		return {};
 	}
-
-	return fetch_managed_objects(
-		[this](clr_handle* buffer, int32_t count)
-		{ return bridge().field_get_attributes(field_, buffer, count); });
+	if(!meta_->attributes_cached)
+	{
+		meta_->attributes = fetch_managed_objects(
+			[this](clr_handle* buffer, int32_t count)
+			{ return bridge().field_get_attributes(field_, buffer, count); });
+		meta_->attributes_cached = true;
+	}
+	return meta_->attributes;
 }
 
 auto clr_field::has_attribute_fullname(const std::string& attribute_full_name) const -> bool

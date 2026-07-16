@@ -43,14 +43,14 @@ struct converter
 		static_assert(is_clr_valuetype<managed_type>::value,                                                 \
 					  "basic_clr_converter is only for value types");                                        \
                                                                                                              \
-		static auto to_mono(const native_type& obj) -> managed_type                                          \
+		static auto to_managed(const native_type& obj) -> managed_type                                          \
 		{                                                                                                    \
 			return managed_interface::converter::convert<native_type, managed_type>(obj);                    \
 		}                                                                                                    \
                                                                                                              \
 		/* unbox from a managed object handle (invoker result path) */                                       \
 		template <typename U>                                                                                \
-		static auto from_mono(const U& obj)                                                                  \
+		static auto from_managed(const U& obj)                                                                  \
 			-> std::enable_if_t<std::is_same<U, managed_ptr>::value, native_type>                            \
 		{                                                                                                    \
 			assert(check_type_layout<managed_type>(obj) && "Different type layouts");                        \
@@ -61,7 +61,7 @@ struct converter
 		}                                                                                                    \
 		/* pass-through (internal call argument path) */                                                     \
 		template <typename U>                                                                                \
-		static auto from_mono(const U& obj)                                                                  \
+		static auto from_managed(const U& obj)                                                                  \
 			-> std::enable_if_t<!std::is_same<U, managed_ptr>::value, native_type>                           \
 		{                                                                                                    \
 			return managed_interface::converter::convert<managed_type, native_type>(obj);                    \
