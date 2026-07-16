@@ -167,7 +167,8 @@ auto get_common_executable_paths() -> const std::vector<std::string>&
 	return paths;
 }
 
-auto init(const compiler_paths& paths, const debugging_config& debugging) -> bool
+auto init(const compiler_paths& paths, const debugging_config& debugging,
+		  const interpreter_config& interpreter) -> bool
 {
 	comp_paths = new compiler_paths(paths);
 
@@ -247,6 +248,13 @@ auto init(const compiler_paths& paths, const debugging_config& debugging) -> boo
 	mono_trace_set_log_handler(on_log_callback, nullptr);
 
 	set_log_handler("default", [](const std::string& msg) { std::cout << msg << std::endl; });
+
+	if(interpreter.interp_mode == interpreter_config::mode::forced)
+	{
+		const char* options[] = {"--interpreter"};
+		mono_jit_parse_options(1, const_cast<char**>(options));
+		log_message("monopp: mono interpreter forced (--interpreter)", "info");
+	}
 
 	jit_domain = mono_jit_init_version("mono_jit", "v4.0.30319");
 

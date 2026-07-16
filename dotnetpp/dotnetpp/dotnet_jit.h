@@ -10,29 +10,11 @@ namespace dotnet
 
 using mono::compiler_paths;
 using mono::debugging_config;
+using mono::interpreter_config;
 
 using mono::init;
 using mono::get_core_assembly_path;
 using mono::shutdown;
-
-/// CoreCLR-only interpreter knob, mirrored here so call sites can stay
-/// backend-agnostic. The mono backend ignores it.
-struct interpreter_config
-{
-	enum class mode
-	{
-		automatic,
-		forced
-	};
-
-	mode interp_mode = mode::automatic;
-};
-
-inline auto init(const compiler_paths& paths, const debugging_config& debugging,
-				 const interpreter_config& /*interpreter*/) -> bool
-{
-	return mono::init(paths, debugging);
-}
 
 using mono::compiler_params;
 using mono::compile_cmd;
