@@ -240,6 +240,10 @@ public static partial class Bridge
             return;
         }
 
+        // Always drop array pins first - even interned keys should not keep
+        // a collectible array rooted through a leftover pin map entry.
+        ArrayPinCache.Release(handle);
+
         // Interned handles live for the whole runtime session.
         if (InternedHandlesReverse.ContainsKey(handle))
         {
@@ -254,8 +258,6 @@ public static partial class Bridge
         {
             Log($"FreeHandle: invalid/already-freed GCHandle: 0x{handle:X}", "error");
         }
-
-        ArrayPinCache.Release(handle);
     }
 
     [UnmanagedCallersOnly]
@@ -338,7 +340,12 @@ public static partial class Bridge
     [UnmanagedCallersOnly]
     public static long GcGetUsedSize()
     {
-        return GC.GetTotalMemory(false);
+        // GetTotalMemory is an approximation; under heavy pinning it has been
+        // observed to undershoot (even negative). HeapSize - FragmentedBytes
+        // tracks committed used memory and stays non-negative.
+        var info = GC.GetGCMemoryInfo();
+        var used = info.HeapSizeBytes - info.FragmentedBytes;
+        return used >= 0 ? used : 0;
     }
 
     // ---------------------------------------------------------------------

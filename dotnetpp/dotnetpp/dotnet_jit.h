@@ -16,21 +16,16 @@ using mono::get_core_assembly_path;
 using mono::shutdown;
 
 /// CoreCLR-only interpreter knob, mirrored here so call sites can stay
-/// backend-agnostic. The mono backend ignores it (mono's interpreter is a
-/// different mechanism, configured through jit options / full-AOT+interp).
+/// backend-agnostic. The mono backend ignores it.
 struct interpreter_config
 {
 	enum class mode
 	{
-		disabled,
-		opt_in,
-		prefer_compiled,
-		interpret_all,
-		interpreter_only
+		automatic,
+		forced
 	};
 
-	mode interp_mode = mode::disabled;
-	std::string filter;
+	mode interp_mode = mode::automatic;
 };
 
 inline auto init(const compiler_paths& paths, const debugging_config& debugging,
@@ -69,9 +64,7 @@ namespace dotnet
 using clr::compiler_paths;
 using clr::debugging_config;
 
-/// Experimental CoreCLR interpreter configuration (see clrpp/clr_jit.h).
-/// Pass as the third argument to init to opt into the "interpreter + R2R"
-/// model once a runtime that ships the interpreter is in use.
+/// CoreCLR interpreter toggle (see clrpp/clr_jit.h).
 using clr::interpreter_config;
 
 using clr::init;

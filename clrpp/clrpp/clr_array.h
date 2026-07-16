@@ -7,6 +7,7 @@
 #include "clr_type_conversion.h"
 #include "clr_type_traits.h"
 
+#include <cstring>
 #include <type_traits>
 #include <vector>
 
@@ -105,9 +106,43 @@ struct has_contiguous_storage<std::vector<bool>> : std::false_type
 {
 };
 
+template <typename T>
+using array_managed_type = typename clr_converter<T>::managed_type;
+
+template <typename T>
+struct array_element_is_direct
+	: std::integral_constant<bool, std::is_same<T, array_managed_type<T>>::value>
+{
+};
+
+/// Pin-once + memcpy is only valid when both the native T and the managed
+/// element layout are trivially copyable (POD converters like Color↔ColorF).
+/// Handle wrappers (managed_ptr) must go through array_get/set_element.
+template <typename T>
+struct array_element_is_pinnable
+	: std::integral_constant<bool, std::is_trivially_copyable<T>::value &&
+									   std::is_trivially_copyable<array_managed_type<T>>::value>
+{
+};
+
+template <typename T>
+struct array_element_is_handle
+	: std::integral_constant<bool, std::is_same<array_managed_type<T>, managed_ptr>::value>
+{
+};
+
+/// Bridge fallback kind: 0 = direct blob, 1 = object handle, 2 = converted POD blob.
+template <typename T>
+using array_bridge_kind =
+	typename std::conditional<array_element_is_direct<T>::value, std::integral_constant<int, 0>,
+							  typename std::conditional<array_element_is_handle<T>::value,
+														std::integral_constant<int, 1>,
+														std::integral_constant<int, 2>>::type>::type;
+
 template <typename T, typename VectorLike>
 inline auto fill_array_from_vector(clr_array<T>& array, const VectorLike& vec)
-	-> typename std::enable_if<has_contiguous_storage<VectorLike>::value>::type
+	-> typename std::enable_if<has_contiguous_storage<VectorLike>::value &&
+							   array_element_is_direct<T>::value>::type
 {
 	if(!vec.empty())
 	{
@@ -118,7 +153,8 @@ inline auto fill_array_from_vector(clr_array<T>& array, const VectorLike& vec)
 
 template <typename T, typename VectorLike>
 inline auto fill_array_from_vector(clr_array<T>& array, const VectorLike& vec)
-	-> typename std::enable_if<!has_contiguous_storage<VectorLike>::value>::type
+	-> typename std::enable_if<!has_contiguous_storage<VectorLike>::value ||
+							   !array_element_is_direct<T>::value>::type
 {
 	for(size_t i = 0; i < vec.size(); ++i)
 	{
@@ -128,7 +164,8 @@ inline auto fill_array_from_vector(clr_array<T>& array, const VectorLike& vec)
 
 template <typename T, typename VectorLike>
 inline auto read_array_to_vector(const clr_array<T>& array, VectorLike& vec)
-	-> typename std::enable_if<has_contiguous_storage<VectorLike>::value>::type
+	-> typename std::enable_if<has_contiguous_storage<VectorLike>::value &&
+							   array_element_is_direct<T>::value>::type
 {
 	const auto count = array.size();
 	vec.resize(count);
@@ -141,7 +178,8 @@ inline auto read_array_to_vector(const clr_array<T>& array, VectorLike& vec)
 
 template <typename T, typename VectorLike>
 inline auto read_array_to_vector(const clr_array<T>& array, VectorLike& vec)
-	-> typename std::enable_if<!has_contiguous_storage<VectorLike>::value>::type
+	-> typename std::enable_if<!has_contiguous_storage<VectorLike>::value ||
+							   !array_element_is_direct<T>::value>::type
 {
 	const auto count = array.size();
 	vec.resize(count);
@@ -158,6 +196,7 @@ class clr_array : public clr_array_base
 {
 public:
 	using clr_array_base::clr_array_base;
+	using managed_element_type = detail::array_managed_type<T>;
 
 	static_assert(is_clr_valuetype<T>::value, "Specialize clr_array for non-value types");
 
@@ -205,13 +244,7 @@ public:
 
 	auto get(size_t index) const -> T
 	{
-		// Offsets assume the managed element size equals sizeof(T); a short
-		// or failed copy (layout mismatch, reference-bearing elements) must
-		// not silently yield a zeroed value.
-		T value{};
-		detail::copy_blittable_bytes(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
-									 std::addressof(value), static_cast<int64_t>(sizeof(T)));
-		return value;
+		return get_impl(index, detail::array_element_is_pinnable<T>{});
 	}
 
 	auto get_object(size_t index) const -> clr_object override
@@ -223,8 +256,7 @@ public:
 
 	void set(size_t index, const T& value)
 	{
-		detail::copy_blittable_bytes_from(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
-										  std::addressof(value), static_cast<int64_t>(sizeof(T)));
+		set_impl(index, value, detail::array_element_is_pinnable<T>{});
 	}
 
 	template <typename VectorLike = std::vector<T>>
@@ -236,6 +268,190 @@ public:
 	}
 
 private:
+	auto get_impl(size_t index, std::true_type /*pinnable*/) const -> T
+	{
+		if(try_ensure_pinned())
+		{
+			const auto offset = static_cast<size_t>(index) * static_cast<size_t>(pinned_elem_size_);
+			if(offset + static_cast<size_t>(pinned_elem_size_) > static_cast<size_t>(pinned_byte_length_))
+			{
+				throw clr_exception("NATIVE::array get out of range");
+			}
+
+			auto* src = static_cast<const char*>(pinned_data_) + offset;
+			return read_element_at(src, detail::array_element_is_direct<T>{});
+		}
+
+		return get_via_bridge(index, detail::array_bridge_kind<T>{});
+	}
+
+	auto get_impl(size_t index, std::false_type /*pinnable*/) const -> T
+	{
+		return get_via_bridge(index, detail::array_bridge_kind<T>{});
+	}
+
+	void set_impl(size_t index, const T& value, std::true_type /*pinnable*/)
+	{
+		if(try_ensure_pinned())
+		{
+			const auto offset = static_cast<size_t>(index) * static_cast<size_t>(pinned_elem_size_);
+			if(offset + static_cast<size_t>(pinned_elem_size_) > static_cast<size_t>(pinned_byte_length_))
+			{
+				throw clr_exception("NATIVE::array set out of range");
+			}
+
+			auto* dest = static_cast<char*>(pinned_data_) + offset;
+			write_element_at(dest, value, detail::array_element_is_direct<T>{});
+			return;
+		}
+
+		set_via_bridge(index, value, detail::array_bridge_kind<T>{});
+	}
+
+	void set_impl(size_t index, const T& value, std::false_type /*pinnable*/)
+	{
+		set_via_bridge(index, value, detail::array_bridge_kind<T>{});
+	}
+
+	auto try_ensure_pinned() const -> bool
+	{
+		const auto handle = get_internal_ptr();
+		if(!handle)
+		{
+			return false;
+		}
+
+		if(pinned_for_ == handle && pinned_data_ != nullptr && pinned_elem_size_ > 0)
+		{
+			return true;
+		}
+
+		clr_array_pin_info info{};
+		if(bridge().array_pin_acquire(handle, &info) == 0 || info.data == nullptr || info.element_size <= 0)
+		{
+			pinned_for_ = nullptr;
+			pinned_data_ = nullptr;
+			pinned_elem_size_ = 0;
+			pinned_byte_length_ = 0;
+			return false;
+		}
+
+		pinned_for_ = handle;
+		pinned_data_ = info.data;
+		pinned_elem_size_ = info.element_size;
+		pinned_byte_length_ = info.byte_length;
+		return true;
+	}
+
+	auto read_element_at(const char* src, std::true_type /*direct*/) const -> T
+	{
+		if(pinned_elem_size_ != static_cast<int32_t>(sizeof(T)))
+		{
+			throw clr_exception("NATIVE::array element size mismatch");
+		}
+		T value{};
+		std::memcpy(std::addressof(value), src, sizeof(T));
+		return value;
+	}
+
+	auto read_element_at(const char* src, std::false_type /*converted*/) const -> T
+	{
+		if(pinned_elem_size_ != static_cast<int32_t>(sizeof(managed_element_type)))
+		{
+			throw clr_exception("NATIVE::array managed element size mismatch");
+		}
+		managed_element_type managed{};
+		std::memcpy(std::addressof(managed), src, sizeof(managed_element_type));
+		return clr_converter<T>::from_mono(managed);
+	}
+
+	void write_element_at(char* dest, const T& value, std::true_type /*direct*/) const
+	{
+		if(pinned_elem_size_ != static_cast<int32_t>(sizeof(T)))
+		{
+			throw clr_exception("NATIVE::array element size mismatch");
+		}
+		std::memcpy(dest, std::addressof(value), sizeof(T));
+	}
+
+	void write_element_at(char* dest, const T& value, std::false_type /*converted*/) const
+	{
+		if(pinned_elem_size_ != static_cast<int32_t>(sizeof(managed_element_type)))
+		{
+			throw clr_exception("NATIVE::array managed element size mismatch");
+		}
+		managed_element_type managed = clr_converter<T>::to_mono(value);
+		std::memcpy(dest, std::addressof(managed), sizeof(managed_element_type));
+	}
+
+	auto get_via_bridge(size_t index, std::integral_constant<int, 0> /*direct*/) const -> T
+	{
+		T value{};
+		detail::copy_blittable_bytes(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
+									 std::addressof(value), static_cast<int64_t>(sizeof(T)));
+		return value;
+	}
+
+	auto get_via_bridge(size_t index, std::integral_constant<int, 1> /*handle*/) const -> T
+	{
+		clr_variant result{};
+		result.kind = clr_variant::kind_object_handle;
+
+		clr_exception_info_raw ex{};
+		bridge().array_get_element(get_internal_ptr(), static_cast<int64_t>(index), &result, &ex);
+		throw_if_exception(ex);
+
+		if(result.kind != clr_variant::kind_object_handle || !result.data)
+		{
+			return T{};
+		}
+		return clr_converter<T>::from_mono(managed_ptr::adopt(result.data));
+	}
+
+	auto get_via_bridge(size_t index, std::integral_constant<int, 2> /*converted*/) const -> T
+	{
+		managed_element_type managed{};
+		clr_variant result{};
+		result.kind = clr_variant::kind_blob;
+		result.size = static_cast<int32_t>(sizeof(managed_element_type));
+		result.data = std::addressof(managed);
+
+		clr_exception_info_raw ex{};
+		bridge().array_get_element(get_internal_ptr(), static_cast<int64_t>(index), &result, &ex);
+		throw_if_exception(ex);
+
+		return clr_converter<T>::from_mono(managed);
+	}
+
+	void set_via_bridge(size_t index, const T& value, std::integral_constant<int, 0> /*direct*/)
+	{
+		detail::copy_blittable_bytes_from(get_internal_ptr(), static_cast<int64_t>(index * sizeof(T)),
+										  std::addressof(value), static_cast<int64_t>(sizeof(T)));
+	}
+
+	void set_via_bridge(size_t index, const T& value, std::integral_constant<int, 1> /*handle*/)
+	{
+		auto handle = clr_converter<T>::to_mono(value);
+		auto variant = to_clr_variant(handle);
+
+		clr_exception_info_raw ex{};
+		bridge().array_set_element(get_internal_ptr(), static_cast<int64_t>(index), &variant, &ex);
+		throw_if_exception(ex);
+	}
+
+	void set_via_bridge(size_t index, const T& value, std::integral_constant<int, 2> /*converted*/)
+	{
+		managed_element_type managed = clr_converter<T>::to_mono(value);
+		clr_variant variant{};
+		variant.kind = clr_variant::kind_blob;
+		variant.size = static_cast<int32_t>(sizeof(managed_element_type));
+		variant.data = std::addressof(managed);
+
+		clr_exception_info_raw ex{};
+		bridge().array_set_element(get_internal_ptr(), static_cast<int64_t>(index), &variant, &ex);
+		throw_if_exception(ex);
+	}
+
 	/// True when this array is a System.Byte[] packing an unknown blittable T
 	/// (see create_array fallback). Recovers the flag when wrapping an existing
 	/// handle where use_raw_bytes_ was not preserved.
@@ -256,6 +472,12 @@ private:
 	}
 
 	bool use_raw_bytes_{};
+
+	// Pin-once cache: lifetime tied to the strong handle (released in FreeHandle).
+	mutable clr_handle pinned_for_{nullptr};
+	mutable void* pinned_data_{nullptr};
+	mutable int32_t pinned_elem_size_{0};
+	mutable int64_t pinned_byte_length_{0};
 };
 
 template <>

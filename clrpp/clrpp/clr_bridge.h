@@ -51,6 +51,15 @@ struct clr_exception_info_raw
 	int32_t has_value = 0;
 };
 
+/// Layout must match Clrpp.NativeArrayPinInfo.
+struct clr_array_pin_info
+{
+	void* data = nullptr;
+	int64_t byte_length = 0;
+	int32_t element_size = 0;
+	int32_t reserved = 0;
+};
+
 namespace bridge_detail
 {
 
@@ -158,6 +167,10 @@ struct exports
 	int32_t(CLRPP_CALLTYPE* weave_assembly)(const char*);
 	clr_handle(CLRPP_CALLTYPE* intern_handle)(clr_handle);
 	int32_t(CLRPP_CALLTYPE* is_debugger_attached)();
+	/// Pin a blittable-element array and return its data pointer. Released by
+	/// array_pin_release or free_handle. 1 = success, 0 = unavailable.
+	int32_t(CLRPP_CALLTYPE* array_pin_acquire)(clr_handle, clr_array_pin_info*);
+	void(CLRPP_CALLTYPE* array_pin_release)(clr_handle);
 };
 
 // Runtime lifecycle, used by clr::init / clr::shutdown. managed_dir is the

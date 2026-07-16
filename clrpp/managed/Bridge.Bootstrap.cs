@@ -112,6 +112,8 @@ public static partial class Bridge
             (IntPtr)(delegate* unmanaged<IntPtr, int>)&WeaveAssembly,
             (IntPtr)(delegate* unmanaged<IntPtr, IntPtr>)&InternHandle,
             (IntPtr)(delegate* unmanaged<int>)&IsDebuggerAttached,
+            (IntPtr)(delegate* unmanaged<IntPtr, NativeArrayPinInfo*, int>)&ArrayPinAcquire,
+            (IntPtr)(delegate* unmanaged<IntPtr, void>)&ArrayPinRelease,
         };
 
         if (slots != null)

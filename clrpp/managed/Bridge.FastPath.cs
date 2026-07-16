@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -16,8 +17,26 @@ public static partial class Bridge
     private const int MaxCachedInvokeArity = 8;
 
     // ---------------------------------------------------------------------
-    // Array pin cache (thread-local, reused across sequential element copies)
+    // Array pin cache
     // ---------------------------------------------------------------------
+    //
+    // Two layers:
+    //   1) Thread-local pin reused by ArrayCopyTo/From (short-lived, one
+    //      array at a time on this thread).
+    //   2) Long-lived pins keyed by the array's strong-handle IntPtr, used by
+    //      ArrayPinAcquire so native clr_array get/set can memcpy without
+    //      re-entering the bridge. Released on ArrayPinRelease / FreeHandle.
+    // ---------------------------------------------------------------------
+
+    private sealed class LongLivedArrayPin
+    {
+        public GCHandle Pin;
+        public int ElementSize;
+        public long ByteLength;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, LongLivedArrayPin>
+        LongLivedPins = new();
 
     private static class ArrayPinCache
     {
@@ -33,12 +52,53 @@ public static partial class Bridge
                 return s_pin;
             }
 
+            // Prefer an already-acquired long-lived pin for this handle so we
+            // do not double-pin the same array on the copy path.
+            if (LongLivedPins.TryGetValue(arrayHandle, out var lived) && lived.Pin.IsAllocated)
+            {
+                // Drop any TLS-owned pin before aliasing the long-lived one.
+                if (s_handle != arrayHandle || !IsAliasingLongLived())
+                {
+                    ReleaseCurrent();
+                }
+
+                s_handle = arrayHandle;
+                s_pin = lived.Pin;
+                s_elementSize = lived.ElementSize;
+                s_byteLength = lived.ByteLength;
+                return s_pin;
+            }
+
             ReleaseCurrent();
             s_pin = GCHandle.Alloc(array, GCHandleType.Pinned);
             s_handle = arrayHandle;
             s_elementSize = 0;
             s_byteLength = -1;
             return s_pin;
+        }
+
+        private static bool IsAliasingLongLived()
+        {
+            return s_handle != IntPtr.Zero && LongLivedPins.ContainsKey(s_handle);
+        }
+
+        private static void SafeFreePin(ref GCHandle pin)
+        {
+            if (!pin.IsAllocated)
+            {
+                return;
+            }
+
+            try
+            {
+                pin.Free();
+            }
+            catch (InvalidOperationException)
+            {
+                // Already freed on another path (TLS alias vs long-lived).
+            }
+
+            pin = default;
         }
 
         internal static int ElementSize(Array array)
@@ -65,7 +125,29 @@ public static partial class Bridge
 
         internal static void Release(IntPtr arrayHandle)
         {
-            if (s_handle == arrayHandle)
+            var livedPin = default(GCHandle);
+            var hadLongLived = LongLivedPins.TryGetValue(arrayHandle, out var lived);
+            if (hadLongLived)
+            {
+                livedPin = lived.Pin;
+            }
+
+            ReleaseLongLived(arrayHandle);
+
+            if (s_handle != arrayHandle)
+            {
+                return;
+            }
+
+            // ReleaseLongLived usually clears TLS; if not (e.g. missed), finish here.
+            if (s_pin.IsAllocated && (hadLongLived && s_pin.Equals(livedPin) || IsAliasingLongLived()))
+            {
+                s_handle = IntPtr.Zero;
+                s_pin = default;
+                s_elementSize = 0;
+                s_byteLength = -1;
+            }
+            else
             {
                 ReleaseCurrent();
             }
@@ -73,15 +155,155 @@ public static partial class Bridge
 
         internal static void ReleaseCurrent()
         {
-            if (s_pin.IsAllocated)
+            // Only free when TLS owns the pin; aliases of long-lived pins must not.
+            if (s_pin.IsAllocated && !IsAliasingLongLived())
             {
-                s_pin.Free();
+                SafeFreePin(ref s_pin);
             }
 
             s_handle = IntPtr.Zero;
+            s_pin = default;
             s_elementSize = 0;
             s_byteLength = -1;
         }
+
+        internal static bool TryAcquireLongLived(IntPtr arrayHandle, Array array,
+                                                 out IntPtr data, out int elementSize, out long byteLength)
+        {
+            data = IntPtr.Zero;
+            elementSize = 0;
+            byteLength = 0;
+
+            var elementType = array.GetType().GetElementType();
+            if (elementType == null || !ClrLayout.IsBlittable(elementType))
+            {
+                return false;
+            }
+
+            // ArrayCopy may already hold a TLS-owned pin for this handle. Drop it
+            // before allocating a long-lived pin so FreeHandle cannot orphan the TLS one.
+            if (s_handle == arrayHandle && s_pin.IsAllocated && !IsAliasingLongLived())
+            {
+                ReleaseCurrent();
+            }
+
+            var lived = LongLivedPins.GetOrAdd(arrayHandle, _ =>
+            {
+                var size = ClrLayout.SizeOf(elementType);
+                return new LongLivedArrayPin
+                {
+                    Pin = GCHandle.Alloc(array, GCHandleType.Pinned),
+                    ElementSize = size,
+                    ByteLength = array.LongLength * size
+                };
+            });
+
+            if (!lived.Pin.IsAllocated)
+            {
+                LongLivedPins.TryRemove(arrayHandle, out _);
+                return false;
+            }
+
+            // TLS should alias the long-lived pin (not a second owned pin).
+            s_handle = arrayHandle;
+            s_pin = lived.Pin;
+            s_elementSize = lived.ElementSize;
+            s_byteLength = lived.ByteLength;
+
+            data = lived.Pin.AddrOfPinnedObject();
+            elementSize = lived.ElementSize;
+            byteLength = lived.ByteLength;
+            return true;
+        }
+
+        internal static void ReleaseLongLived(IntPtr arrayHandle)
+        {
+            if (!LongLivedPins.TryRemove(arrayHandle, out var lived))
+            {
+                return;
+            }
+
+            if (s_handle == arrayHandle)
+            {
+                // Free a TLS-owned pin that is not the long-lived one (orphan guard).
+                if (s_pin.IsAllocated && !s_pin.Equals(lived.Pin))
+                {
+                    SafeFreePin(ref s_pin);
+                }
+
+                s_handle = IntPtr.Zero;
+                s_pin = default;
+                s_elementSize = 0;
+                s_byteLength = -1;
+            }
+
+            SafeFreePin(ref lived.Pin);
+        }
+
+        /// <summary>
+        /// Drop every long-lived array pin. Required before ALC unload so
+        /// pinned handles cannot root collectible assemblies.
+        /// </summary>
+        internal static void ReleaseAllLongLived()
+        {
+            var keys = LongLivedPins.Keys.ToArray();
+            if (keys.Length > 0)
+            {
+                Log($"releasing {keys.Length} long-lived array pin(s) before domain unload", "debug");
+            }
+
+            foreach (var key in keys)
+            {
+                ReleaseLongLived(key);
+            }
+
+            LongLivedPins.Clear();
+            ReleaseCurrent();
+        }
+    }
+
+    /// <summary>
+    /// Layout must match clr::clr_array_pin_info on the native side.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NativeArrayPinInfo
+    {
+        public IntPtr Data;
+        public long ByteLength;
+        public int ElementSize;
+        public int Reserved;
+    }
+
+    /// <summary>
+    /// Pin a blittable-element array for native pointer access. The pin is
+    /// released by ArrayPinRelease or FreeHandle (same strong-handle key).
+    /// Returns 1 on success, 0 when the array is missing / non-blittable.
+    /// </summary>
+    [UnmanagedCallersOnly]
+    public static unsafe int ArrayPinAcquire(IntPtr arrayHandle, NativeArrayPinInfo* info)
+    {
+        if (info == null || Target(arrayHandle) is not Array array)
+        {
+            return 0;
+        }
+
+        if (!ArrayPinCache.TryAcquireLongLived(arrayHandle, array, out var data, out var elemSize,
+                                               out var byteLength))
+        {
+            return 0;
+        }
+
+        info->Data = data;
+        info->ByteLength = byteLength;
+        info->ElementSize = elemSize;
+        info->Reserved = 0;
+        return 1;
+    }
+
+    [UnmanagedCallersOnly]
+    public static void ArrayPinRelease(IntPtr arrayHandle)
+    {
+        ArrayPinCache.ReleaseLongLived(arrayHandle);
     }
 
     // ---------------------------------------------------------------------

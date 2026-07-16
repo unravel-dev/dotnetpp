@@ -303,53 +303,23 @@ namespace
  */
 void apply_interpreter_config(const interpreter_config& interp)
 {
-	if(interp.interp_mode == interpreter_config::mode::disabled)
+	if(interp.interp_mode != interpreter_config::mode::forced)
 	{
 		return;
 	}
 
-	auto set_if_unset = [](const char* name, const std::string& value)
+	const char* name = "DOTNET_InterpMode";
+	const char* value = "1";
+	if(!path_utils::get_env(name).empty())
 	{
-		if(!path_utils::get_env(name).empty())
-		{
-			log_message(std::string("clrpp: ") + name + " already set in environment; keeping it", "info");
-			return;
-		}
-		path_utils::set_env(name, value);
-		log_message(std::string("clrpp: ") + name + "=" + value, "info");
-	};
-
-	switch(interp.interp_mode)
-	{
-		case interpreter_config::mode::opt_in:
-			if(interp.filter.empty())
-			{
-				log_message("clrpp: interpreter mode::opt_in requires a filter; ignoring", "warning");
-				return;
-			}
-			set_if_unset("DOTNET_Interpreter", interp.filter);
-			break;
-		case interpreter_config::mode::prefer_compiled:
-			set_if_unset("DOTNET_InterpMode", "1");
-			break;
-		case interpreter_config::mode::interpret_all:
-			set_if_unset("DOTNET_InterpMode", "2");
-			break;
-		case interpreter_config::mode::interpreter_only:
-			set_if_unset("DOTNET_InterpMode", "3");
-			break;
-		default:
-			return;
+		log_message(std::string("clrpp: ") + name + " already set in environment; keeping it", "info");
+		return;
 	}
 
-	// Tiered compilation can replace interpreter code with jitted code
-	// behind the interpreter's back (dotnet/runtime#118911); newer runtimes
-	// disable it automatically when the interpreter is active, but being
-	// explicit keeps earlier preview builds working too.
-	set_if_unset("DOTNET_TieredCompilation", "0");
-
-	log_message("clrpp: coreclr interpreter requested; runtimes without the interpreter "
-				"(current release builds) ignore these switches and run under the JIT",
+	path_utils::set_env(name, value);
+	log_message(std::string("clrpp: ") + name + "=" + value, "info");
+	log_message("clrpp: coreclr interpreter forced; runtimes without the interpreter "
+				"ignore this switch and run under the JIT",
 				"info");
 }
 } // namespace
