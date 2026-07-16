@@ -95,6 +95,20 @@ public:
 	/// Type of List<this>.
 	auto get_list_type() const -> clr_type;
 
+	/// True if both wrappers refer to the same System.Type instance.
+	auto equals(const clr_type& other) const -> bool;
+
+	friend auto operator==(const clr_type& a, const clr_type& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const clr_type& a, const clr_type& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend handle (interned for types). Prefer equals() for identity.
 	auto get_internal_ptr() const -> clr_handle;
 
 	static auto get_hash(const std::string& name) -> size_t;

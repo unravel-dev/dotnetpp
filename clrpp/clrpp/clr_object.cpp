@@ -51,6 +51,11 @@ auto clr_object::is_valid_clr_object() const -> bool
 	return valid();
 }
 
+auto clr_object::equals(const clr_object& other) const -> bool
+{
+	return bridge().handle_equals(get_internal_ptr(), other.get_internal_ptr()) != 0;
+}
+
 auto clr_object::get_internal_ptr() const -> clr_handle
 {
 	return object_.get();

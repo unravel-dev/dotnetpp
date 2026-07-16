@@ -173,7 +173,7 @@ public:
 	void add()
 	{
 		auto item_prop = get_type().get_property("Item");
-		if(item_prop.get_internal_ptr())
+		if(item_prop.is_valid())
 		{
 			auto item_obj = item_prop.get_type().new_instance();
 			add(item_obj);

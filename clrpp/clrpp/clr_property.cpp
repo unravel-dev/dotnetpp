@@ -155,6 +155,16 @@ auto clr_property::has_default() const -> bool
 	return meta_ && (meta_->flags & property_flag_has_default) != 0;
 }
 
+auto clr_property::is_valid() const -> bool
+{
+	return property_ != nullptr;
+}
+
+auto clr_property::equals(const clr_property& other) const -> bool
+{
+	return bridge().handle_equals(get_internal_ptr(), other.get_internal_ptr()) != 0;
+}
+
 auto clr_property::get_internal_ptr() const -> clr_handle
 {
 	return property_;

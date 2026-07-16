@@ -257,6 +257,17 @@ auto mono_field::is_backing_field() const -> bool
 
 	return false;
 }
+
+auto mono_field::equals(const mono_field& other) const -> bool
+{
+	return get_internal_ptr() == other.get_internal_ptr();
+}
+
+auto mono_field::get_internal_ptr() const -> MonoClassField*
+{
+	return field_;
+}
+
 void reset_field_cache()
 {
 	auto& cache = get_field_cache();

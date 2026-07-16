@@ -168,9 +168,19 @@ auto clr_domain::get_name() const -> std::string
 	return name_;
 }
 
+auto clr_domain::equals(const clr_domain& other) const -> bool
+{
+	return bridge().handle_equals(get_internal_ptr(), other.get_internal_ptr()) != 0;
+}
+
 auto clr_domain::get_internal_ptr() const -> clr_handle
 {
 	return domain_;
+}
+
+auto clr_domain::get_version() const -> uint64_t
+{
+	return static_cast<uint64_t>(reinterpret_cast<intptr_t>(get_internal_ptr()));
 }
 
 } // namespace clr

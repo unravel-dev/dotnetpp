@@ -139,6 +139,11 @@ auto clr_field::is_valuetype() const -> bool
 	return type_.is_valuetype();
 }
 
+auto clr_field::equals(const clr_field& other) const -> bool
+{
+	return bridge().handle_equals(get_internal_ptr(), other.get_internal_ptr()) != 0;
+}
+
 auto clr_field::get_internal_ptr() const -> clr_handle
 {
 	return field_;

@@ -47,6 +47,20 @@ public:
 	auto valid() const -> bool;
 	operator bool() const;
 
+	/// True if both wrappers refer to the same MonoMethod.
+	auto equals(const mono_method& other) const -> bool;
+
+	friend auto operator==(const mono_method& a, const mono_method& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const mono_method& a, const mono_method& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend pointer. Prefer equals() for identity checks.
 	auto get_internal_ptr() const -> MonoMethod*;
 
 protected:

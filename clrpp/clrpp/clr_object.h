@@ -28,7 +28,22 @@ public:
 
 	auto is_valid_clr_object() const -> bool;
 
-	/// Raw GCHandle (lifetime owned by this object / shared copies).
+	/// True if both wrappers refer to the same managed instance
+	/// (System.Object.ReferenceEquals), even when GCHandle values differ.
+	auto equals(const clr_object& other) const -> bool;
+
+	friend auto operator==(const clr_object& a, const clr_object& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const clr_object& a, const clr_object& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend handle. Prefer equals() / operator== for identity checks;
+	/// handle values are not unique per managed instance.
 	auto get_internal_ptr() const -> clr_handle;
 
 	/// Shared ownership of the underlying handle.

@@ -335,4 +335,14 @@ auto mono_assembly::dump_references() const -> std::vector<std::string>
 	return refs;
 }
 
+auto mono_assembly::equals(const mono_assembly& other) const -> bool
+{
+	return get_internal_ptr() == other.get_internal_ptr();
+}
+
+auto mono_assembly::get_internal_ptr() const -> MonoImage*
+{
+	return image_;
+}
+
 } // namespace mono

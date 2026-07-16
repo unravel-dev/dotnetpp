@@ -467,8 +467,7 @@ private:
 		}
 		const auto element = get_element_type();
 		const auto byte_type = detail::byte_element_type();
-		return element.valid() && byte_type.valid() &&
-			   element.get_internal_ptr() == byte_type.get_internal_ptr();
+		return element.valid() && byte_type.valid() && element.equals(byte_type);
 	}
 
 	bool use_raw_bytes_{};

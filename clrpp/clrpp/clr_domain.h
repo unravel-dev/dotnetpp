@@ -34,6 +34,22 @@ public:
 
 	auto get_name() const -> std::string;
 
+	auto get_version() const -> uint64_t;
+
+	/// True if both wrappers refer to the same load context / domain.
+	auto equals(const clr_domain& other) const -> bool;
+
+	friend auto operator==(const clr_domain& a, const clr_domain& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const clr_domain& a, const clr_domain& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend handle. Prefer equals() for identity checks.
 	auto get_internal_ptr() const -> clr_handle;
 
 	static void set_current_domain(const clr_domain& domain);

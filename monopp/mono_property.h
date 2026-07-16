@@ -53,6 +53,22 @@ public:
 
 	auto has_default() const -> bool;
 
+	auto is_valid() const -> bool;
+
+	/// True if both wrappers refer to the same MonoProperty.
+	auto equals(const mono_property& other) const -> bool;
+
+	friend auto operator==(const mono_property& a, const mono_property& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const mono_property& a, const mono_property& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend pointer. Prefer is_valid() / equals() over raw pointer checks.
 	auto get_internal_ptr() const -> MonoProperty*;
 
 private:

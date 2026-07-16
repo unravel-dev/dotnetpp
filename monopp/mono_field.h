@@ -48,6 +48,22 @@ public:
 
 	auto is_backing_field() const -> bool;
 
+	/// True if both wrappers refer to the same MonoClassField.
+	auto equals(const mono_field& other) const -> bool;
+
+	friend auto operator==(const mono_field& a, const mono_field& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const mono_field& a, const mono_field& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend pointer. Prefer equals() for identity checks.
+	auto get_internal_ptr() const -> MonoClassField*;
+
 protected:
 	void generate_meta();
 

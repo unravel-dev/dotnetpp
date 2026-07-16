@@ -333,6 +333,11 @@ auto clr_type::get_list_type() const -> clr_type
 	return handle ? clr_type(handle) : clr_type();
 }
 
+auto clr_type::equals(const clr_type& other) const -> bool
+{
+	return bridge().handle_equals(get_internal_ptr(), other.get_internal_ptr()) != 0;
+}
+
 auto clr_type::get_internal_ptr() const -> clr_handle
 {
 	return type_;

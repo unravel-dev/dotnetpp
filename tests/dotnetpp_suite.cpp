@@ -11,6 +11,10 @@
 #include <dotnetpp/dotnet_managed.h>
 #include <suitepp/suite.hpp>
 
+#if DOTNETPP_BACKEND_CORECLR
+#include <clrpp/clr_bridge.h>
+#endif
+
 /*
  * A single managed fixture serves both backends: mono resolves
  * [MethodImpl(InternalCall)] natively, coreclr weaves the same externs as
@@ -1496,6 +1500,123 @@ void test_suite()
 			auto got = field.get_value(obj);
 			EXPECT(got.valid());
 			EXPECT(got.get_type().get_fullname() == std::string("Tests.MonoppTest"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : object equality")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto a = type.new_instance();
+			auto b = type.new_instance();
+			auto a_copy = a;
+
+			EXPECT(a == a_copy);
+			EXPECT(a.equals(a_copy));
+			EXPECT(!(a != a_copy));
+			EXPECT(a != b);
+			EXPECT(!(a == b));
+			EXPECT(dotnet::object{} == dotnet::object{});
+			EXPECT(dotnet::object{} != a);
+
+#if DOTNETPP_BACKEND_CORECLR
+			// Distinct GCHandles for the same instance must still compare equal.
+			auto a_dup = dotnet::object(clr::managed_ptr::share(a.get_internal_ptr()));
+			EXPECT(a == a_dup);
+			EXPECT(a.equals(a_dup));
+			EXPECT(a.get_internal_ptr() != a_dup.get_internal_ptr());
+#endif
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : type equality")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type_a = assembly.get_type("Tests", "MonoppTest");
+			auto type_b = assembly.get_type("Tests", "MonoppTest");
+			auto type_other = assembly.get_type("Tests", "DerivedTest");
+
+			EXPECT(type_a == type_b);
+			EXPECT(type_a.equals(type_b));
+			EXPECT(type_a != type_other);
+			EXPECT(!(type_a == type_other));
+			EXPECT(dotnet::type{} == dotnet::type{});
+			EXPECT(dotnet::type{} != type_a);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : field / method / property equality")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+
+			auto field_a = type.get_field("someField");
+			auto field_b = type.get_field("someField");
+			auto field_other = type.get_field("someFieldStatic");
+			EXPECT(field_a == field_b);
+			EXPECT(field_a.equals(field_b));
+			EXPECT(field_a != field_other);
+
+			auto method_a = type.get_method("Method1", 0);
+			auto method_b = type.get_method("Method1", 0);
+			auto method_other = type.get_method("Method2", 1);
+			EXPECT(method_a == method_b);
+			EXPECT(method_a.equals(method_b));
+			EXPECT(method_a != method_other);
+			EXPECT(dotnet::method{} == dotnet::method{});
+			EXPECT(dotnet::method{} != method_a);
+
+			auto prop_a = type.get_property("someProperty");
+			auto prop_b = type.get_property("someProperty");
+			auto prop_other = type.get_property("somePropertyStatic");
+			EXPECT(prop_a == prop_b);
+			EXPECT(prop_a.equals(prop_b));
+			EXPECT(prop_a != prop_other);
+			EXPECT(prop_a.is_valid());
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : assembly equality")
+	{
+		auto expression = [&]()
+		{
+			auto assembly_a = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto assembly_b = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto corlib = dotnet::assembly::get_corlib();
+
+			EXPECT(assembly_a == assembly_b);
+			EXPECT(assembly_a.equals(assembly_b));
+			EXPECT(assembly_a != corlib);
+			EXPECT(corlib == dotnet::assembly::get_corlib());
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : domain equality")
+	{
+		auto expression = [&]()
+		{
+			EXPECT(domain == dotnet::domain::get_current_domain());
+			EXPECT(domain.equals(dotnet::domain::get_current_domain()));
+
+			dotnet::domain child("dotnetpp_equality_child");
+			EXPECT(domain != child);
+			EXPECT(!(domain == child));
+
+			dotnet::domain::set_current_domain(child);
+			EXPECT(child == dotnet::domain::get_current_domain());
+			dotnet::domain::set_current_domain(domain);
+			EXPECT(domain == dotnet::domain::get_current_domain());
 		};
 		EXPECT_NOTHROWS(expression());
 	};

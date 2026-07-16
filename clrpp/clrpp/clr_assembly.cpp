@@ -111,6 +111,11 @@ auto clr_assembly::dump_references() const -> std::vector<std::string>
 	return result;
 }
 
+auto clr_assembly::equals(const clr_assembly& other) const -> bool
+{
+	return bridge().handle_equals(get_internal_ptr(), other.get_internal_ptr()) != 0;
+}
+
 auto clr_assembly::get_internal_ptr() const -> clr_handle
 {
 	return assembly_;

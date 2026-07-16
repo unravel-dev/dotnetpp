@@ -99,6 +99,11 @@ mono_method::mono_method(const mono_type& type, const std::string& name, int arg
 	generate_meta();
 }
 
+auto mono_method::equals(const mono_method& other) const -> bool
+{
+	return get_internal_ptr() == other.get_internal_ptr();
+}
+
 auto mono_method::get_internal_ptr() const -> MonoMethod*
 {
 	return method_;

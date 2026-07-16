@@ -44,6 +44,11 @@ auto mono_managed_gc_collect(std::string& err) -> bool
 } // namespace
 static const mono_domain* current_domain = nullptr;
 
+auto mono_domain::equals(const mono_domain& other) const -> bool
+{
+	return get_internal_ptr() == other.get_internal_ptr();
+}
+
 auto mono_domain::get_internal_ptr() const -> MonoDomain*
 {
 	return domain_;
@@ -185,5 +190,9 @@ auto mono_domain::get_name() const -> std::string
 	return mono_domain_get_friendly_name(domain_);
 }
 
+auto mono_domain::get_version() const -> uint64_t
+{
+	return static_cast<uint64_t>(reinterpret_cast<intptr_t>(get_internal_ptr()));
+}
 
 } // namespace mono

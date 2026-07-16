@@ -67,6 +67,16 @@ mono_property::mono_property(const mono_type& type, const std::string& name)
 	generate_meta();
 }
 
+auto mono_property::is_valid() const -> bool
+{
+	return property_ != nullptr;
+}
+
+auto mono_property::equals(const mono_property& other) const -> bool
+{
+	return get_internal_ptr() == other.get_internal_ptr();
+}
+
 auto mono_property::get_internal_ptr() const -> MonoProperty*
 {
 	return property_;

@@ -76,6 +76,11 @@ auto mono_object::is_valid_mono_object() const -> bool
 	return mono_object_get_class(object_) != nullptr;
 }
 
+auto mono_object::equals(const mono_object& other) const -> bool
+{
+	return get_internal_ptr() == other.get_internal_ptr();
+}
+
 auto mono_object::get_internal_ptr() const -> MonoObject*
 {
 	return object_;

@@ -27,6 +27,20 @@ public:
 	static auto get_corlib() -> clr_assembly;
 	auto dump_references() const -> std::vector<std::string>;
 
+	/// True if both wrappers refer to the same Assembly.
+	auto equals(const clr_assembly& other) const -> bool;
+
+	friend auto operator==(const clr_assembly& a, const clr_assembly& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const clr_assembly& a, const clr_assembly& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend handle. Prefer equals() for identity checks.
 	auto get_internal_ptr() const -> clr_handle;
 
 private:

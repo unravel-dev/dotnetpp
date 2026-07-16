@@ -48,6 +48,20 @@ public:
 	auto valid() const -> bool;
 	operator bool() const;
 
+	/// True if both wrappers refer to the same MethodInfo.
+	auto equals(const clr_method& other) const -> bool;
+
+	friend auto operator==(const clr_method& a, const clr_method& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const clr_method& a, const clr_method& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend handle. Prefer equals() for identity checks.
 	auto get_internal_ptr() const -> clr_handle;
 
 protected:

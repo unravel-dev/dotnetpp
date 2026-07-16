@@ -164,6 +164,11 @@ clr_method::operator bool() const
 	return valid();
 }
 
+auto clr_method::equals(const clr_method& other) const -> bool
+{
+	return bridge().handle_equals(get_internal_ptr(), other.get_internal_ptr()) != 0;
+}
+
 auto clr_method::get_internal_ptr() const -> clr_handle
 {
 	return method_;

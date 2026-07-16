@@ -54,6 +54,22 @@ public:
 
 	auto has_default() const -> bool;
 
+	auto is_valid() const -> bool;
+
+	/// True if both wrappers refer to the same PropertyInfo.
+	auto equals(const clr_property& other) const -> bool;
+
+	friend auto operator==(const clr_property& a, const clr_property& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const clr_property& a, const clr_property& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend handle. Prefer is_valid() / equals() over raw handle checks.
 	auto get_internal_ptr() const -> clr_handle;
 
 private:
