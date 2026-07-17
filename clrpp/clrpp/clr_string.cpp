@@ -5,7 +5,9 @@
 
 #if defined(__clang__)
 #pragma clang diagnostic push
+#if defined(__has_warning) && __has_warning("-Wcharacter-conversion")
 #pragma clang diagnostic ignored "-Wcharacter-conversion"
+#endif
 #endif
 #include "utf8/unchecked.h"
 #if defined(__clang__)
