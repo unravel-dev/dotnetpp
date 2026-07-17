@@ -49,6 +49,11 @@ auto mono_thunk_exception::message() const -> const std::string&
 	return info_.message;
 }
 
+auto mono_thunk_exception::source() const -> const std::string&
+{
+	return info_.source;
+}
+
 auto mono_thunk_exception::stacktrace() const -> const std::string&
 {
 	return info_.stacktrace;

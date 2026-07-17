@@ -48,7 +48,7 @@ struct return_type_traits<R, false>
 	static auto call(Func func, Args&&... args) -> managed_return_t
 	{
 		auto result = func(std::forward<Args>(args)...);
-		return return_t::to_mono(result);
+		return return_t::to_managed(result);
 	}
 };
 
@@ -91,7 +91,7 @@ struct mono_jit_internal_call_wrapper<R(Args...), func>
 
 	static auto wrapper(func_args_t<Args>... args) -> managed_return_t
 	{
-		return traits::call(func, args_t<Args>::from_mono(args)...);
+		return traits::call(func, args_t<Args>::from_managed(args)...);
 	}
 };
 

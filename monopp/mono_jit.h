@@ -22,7 +22,23 @@ struct debugging_config
 	uint32_t loglevel = 0;
 };
 
-auto init(const compiler_paths& paths = {}, const debugging_config& debugging = {}) -> bool;
+/*
+ * automatic: leave Mono alone (JIT as usual).
+ * forced: pass --interpreter before mono_jit_init for desktop testing.
+ */
+struct interpreter_config
+{
+	enum class mode
+	{
+		automatic,
+		forced
+	};
+
+	mode interp_mode = mode::automatic;
+};
+
+auto init(const compiler_paths& paths = {}, const debugging_config& debugging = {},
+		  const interpreter_config& interpreter = {}) -> bool;
 auto get_core_assembly_path() -> std::string;
 void shutdown();
 

@@ -49,18 +49,15 @@ auto has_compatible_signature(const mono_method& method) -> bool
 			return false;
 		}
 	}
-	arg_types tuple;
-	size_t idx = 0;
-	mono::for_each(tuple,
-			 [&compatible, &idx, &expected_arg_types](const auto& arg)
-			 {
-				 mono::ignore(arg);
-				 auto expected_arg_type = expected_arg_types[idx];
-				 using arg_type = decltype(arg);
-				 compatible &= is_compatible_type<arg_type>(expected_arg_type);
-
-				 idx++;
-			 });
+	// Iterate over the argument types without constructing values (argument
+	// types are not required to be default constructible). The check keeps
+	// the historical const& semantics of the value based iteration.
+	mono::for_each_tuple_type<arg_types>(
+		[&compatible, &expected_arg_types](auto index)
+		{
+			using arg_type = const std::tuple_element_t<decltype(index)::value, arg_types>&;
+			compatible &= is_compatible_type<arg_type>(expected_arg_types[decltype(index)::value]);
+		});
 
 	return compatible;
 }
@@ -99,7 +96,7 @@ private:
 				method = mono_object_get_virtual_method(object, method);
 			}
 		}
-		auto tup = std::make_tuple(mono_converter<std::decay_t<Args>>::to_mono(std::forward<Args>(args))...);
+		auto tup = std::make_tuple(mono_converter<std::decay_t<Args>>::to_managed(std::forward<Args>(args))...);
 
 		const auto& param_types = this->get_param_types();
 		auto inv = [&](auto... args)
@@ -112,7 +109,7 @@ private:
 			
 			// C++14 compatible parameter pack expansion using initializer list
 			std::initializer_list<int> dummy = {(
-				argsv[idx] = to_mono_arg(args, (idx < param_types.size()) ? param_types[idx] : mono_type{}),
+				argsv[idx] = to_managed_arg(args, (idx < param_types.size()) ? param_types[idx] : mono_type{}),
 				++idx,
 				0
 			)...};
@@ -170,7 +167,7 @@ private:
 				method = mono_object_get_virtual_method(object, method);
 			}
 		}
-		auto tup = std::make_tuple(mono_converter<std::decay_t<Args>>::to_mono(std::forward<Args>(args))...);
+		auto tup = std::make_tuple(mono_converter<std::decay_t<Args>>::to_managed(std::forward<Args>(args))...);
 		const auto& param_types = this->get_param_types();
 		auto inv = [&](auto... args)
 		{
@@ -182,7 +179,7 @@ private:
 			
 			// C++14 compatible parameter pack expansion using initializer list
 			std::initializer_list<int> dummy = {(
-				argsv[idx] = to_mono_arg(args, (idx < param_types.size()) ? param_types[idx] : mono_type{}),
+				argsv[idx] = to_managed_arg(args, (idx < param_types.size()) ? param_types[idx] : mono_type{}),
 				++idx,
 				0
 			)...};
@@ -199,7 +196,7 @@ private:
 		};
 
 		auto result = mono::apply(inv, tup);
-		return mono_converter<std::decay_t<RetType>>::from_mono(std::move(result));
+		return mono_converter<std::decay_t<RetType>>::from_managed(std::move(result));
 	}
 
 	template <typename Signature>

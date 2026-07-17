@@ -29,6 +29,20 @@ public:
 	
 	auto is_valid_mono_object() const -> bool;
 
+	/// True if both wrappers refer to the same MonoObject instance.
+	auto equals(const mono_object& other) const -> bool;
+
+	friend auto operator==(const mono_object& a, const mono_object& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const mono_object& a, const mono_object& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend pointer. Prefer equals() / operator== for identity checks.
 	auto get_internal_ptr() const -> MonoObject*;
 
 	

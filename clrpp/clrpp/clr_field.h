@@ -1,0 +1,87 @@
+#pragma once
+
+#include "clr_bridge.h"
+#include "clr_config.h"
+#include "clr_member_meta.h"
+#include "clr_object.h"
+#include "clr_type.h"
+#include "clr_visibility.h"
+
+#include <vector>
+
+namespace clr
+{
+
+class clr_field
+{
+public:
+	struct meta_info;
+
+	explicit clr_field(clr_handle field_handle);
+	explicit clr_field(const clr_type& type, const std::string& name);
+
+	auto get_name() const -> std::string;
+
+	auto get_fullname() const -> std::string;
+
+	auto get_full_declname() const -> std::string;
+
+	auto get_type() const -> const clr_type&;
+
+	auto get_visibility() const -> visibility;
+
+	auto is_static() const -> bool;
+
+	auto get_attributes() const -> std::vector<clr_object>;
+
+	auto has_attribute_fullname(const std::string& attribute_full_name) const -> bool;
+
+	auto has_attribute(const std::string& attribute_name) const -> bool;
+
+	auto get_attribute_fullname(const std::string& attribute_full_name) const -> clr_object;
+
+	auto get_attribute(const std::string& attribute_name) const -> clr_object;
+
+	auto is_readonly() const -> bool;
+
+	auto is_const() const -> bool;
+
+	auto is_backing_field() const -> bool;
+
+	/// True if both wrappers refer to the same FieldInfo.
+	auto equals(const clr_field& other) const -> bool;
+
+	friend auto operator==(const clr_field& a, const clr_field& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const clr_field& a, const clr_field& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend handle. Prefer equals() for identity checks.
+	auto get_internal_ptr() const -> clr_handle;
+
+protected:
+	void generate_meta(const clr_type& declaring_type);
+
+	auto is_valuetype() const -> bool;
+
+	clr_type type_;
+
+	non_owning_ptr<void> field_ = nullptr;
+
+	std::shared_ptr<meta_info> meta_{};
+};
+
+struct clr_field::meta_info : clr_member_meta_info
+{
+	mutable std::vector<clr_object> attributes;
+	mutable bool attributes_cached = false;
+};
+
+void reset_field_cache();
+
+} // namespace clr

@@ -701,6 +701,11 @@ auto mono_type::get_nested_types() const -> std::vector<mono_type>
 	return nested_types;
 }
 
+auto mono_type::equals(const mono_type& other) const -> bool
+{
+	return get_internal_ptr() == other.get_internal_ptr();
+}
+
 auto mono_type::get_internal_ptr() const -> MonoClass*
 {
 	return class_;
@@ -934,7 +939,7 @@ auto mono_type::get_array_element_type() const -> mono_type
 auto mono_type::get_list_element_type() const -> mono_type
 {
 	mono_property item_prop = get_property("Item");
-	if(!item_prop.get_internal_ptr())
+	if(!item_prop.is_valid())
 		return {};
 
 	// The return type of the "Item" property is the element type T

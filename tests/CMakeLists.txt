@@ -1,12 +1,14 @@
 SET(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
 
-file(GLOB_RECURSE libsrc *.h *.cpp *.hpp *.c *.cc *.cs)
+# A single unified suite runs on both backends.
+set(libsrc main.cpp dotnetpp_suite.cpp dotnetpp_suite.h)
+set(backend_libs dotnetpp)
 
 set(target_name monopp_test)
 
 add_executable (${target_name} ${libsrc})
 
-target_link_libraries(${target_name} PUBLIC monort suitepp)
+target_link_libraries(${target_name} PUBLIC ${backend_libs} suitepp)
 
 set_target_properties(${target_name} PROPERTIES
     CXX_STANDARD 14
@@ -26,6 +28,19 @@ set_code_style(${target_name} lower_case check_headers "${extra_flags}")
 
 enable_testing()
 add_test(NAME ${target_name} COMMAND ${target_name})
+
+# Performance harness (not a ctest - run manually and compare backends).
+set(perf_target monopp_perf)
+add_executable(${perf_target} dotnetpp_perf.cpp)
+target_link_libraries(${perf_target} PUBLIC ${backend_libs})
+set_target_properties(${perf_target} PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO
+)
+target_compile_definitions(${perf_target} PUBLIC DATA_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/")
+set_warning_level(${perf_target} ultra)
+set_code_style(${perf_target} lower_case check_headers "${extra_flags}")
 
 file(GLOB_RECURSE libsharp *.cs)
 

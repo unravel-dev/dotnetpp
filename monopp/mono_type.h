@@ -100,6 +100,20 @@ public:
 	auto is_string() const -> bool;
 	auto is_list() const -> bool;
 
+	/// True if both wrappers refer to the same MonoClass.
+	auto equals(const mono_type& other) const -> bool;
+
+	friend auto operator==(const mono_type& a, const mono_type& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const mono_type& a, const mono_type& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend pointer. Prefer equals() for identity checks.
 	auto get_internal_ptr() const -> MonoClass*;
 
 	static auto get_hash(const std::string& name) -> size_t;

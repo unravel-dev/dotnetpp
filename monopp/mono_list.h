@@ -129,9 +129,9 @@ public:
 
 	template<typename VectorLike = std::vector<T>>
 	mono_list(const VectorLike& vec)
-		: mono_list_base(create_list(mono_domain::get_current_domain(), vec.size(), {}))
+		: mono_list_base(create_list(mono_domain::get_current_domain(), mono_type{}))
 	{
-		for(auto& item : vec)
+		for(const auto& item : vec)
 		{
 			add(item);
 		}
@@ -173,7 +173,7 @@ public:
 	void add()
 	{
 		auto item_prop = get_type().get_property("Item");
-		if(item_prop.get_internal_ptr())
+		if(item_prop.is_valid())
 		{
 			auto item_obj = item_prop.get_type().new_instance();
 			add(item_obj);
@@ -218,15 +218,10 @@ public:
 	template<typename VectorLike = std::vector<T>>
 	auto to_vector() const -> VectorLike
 	{
-		auto element_type = get_element_type();
 		VectorLike vec(size());
 		for(size_t i = 0; i < size(); ++i)
 		{
 			vec[i] = get(i);
-			if(!vec[i].get_type().valid())
-			{
-				vec[i] = mono_object(nullptr, element_type);
-			}
 		}
 		return vec;
 	}
@@ -433,17 +428,15 @@ struct mono_converter<mono_list<T>>
 	using native_type = mono_list<T>;
 	using managed_type = MonoObject*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj.get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
-		if(!obj)
-		{
-			return {};
-		}
+		// mono_list has no default constructor; a null handle yields an
+		// invalid (but constructible) wrapper.
 		return mono_list<T>(mono_object(obj));
 	}
 };
@@ -454,12 +447,12 @@ struct mono_converter<std::list<T>>
 	using native_type = std::list<T>;
 	using managed_type = MonoObject*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return mono_list<T>(obj).get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{

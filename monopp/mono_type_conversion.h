@@ -25,12 +25,12 @@ struct mono_converter<mono_object>
 	using native_type = mono_object;
 	using managed_type = MonoObject*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj.get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{
@@ -46,7 +46,7 @@ struct mono_converter<mono_type>
 	using native_type = mono_type;
 	using managed_type = MonoReflectionType*;
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		// Get the current Mono domain
 		MonoDomain* domain = mono_domain_get();
@@ -60,7 +60,7 @@ struct mono_converter<mono_type>
 		return reflectionType;
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{
@@ -77,13 +77,13 @@ struct mono_converter<std::string>
 	using native_type = std::string;
 	using managed_type = MonoObject*; 
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		const auto& domain = mono_domain::get_current_domain();
 		return mono_string(domain, obj).get_internal_ptr();
 	}
 
-	static auto from_mono(const managed_type& obj) -> native_type
+	static auto from_managed(const managed_type& obj) -> native_type
 	{
 		if(!obj)
 		{

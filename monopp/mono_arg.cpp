@@ -4,7 +4,7 @@
 namespace mono
 {
 
-auto to_mono_arg(MonoObject* value_obj, const mono_type& type) -> void*
+auto to_managed_arg(MonoObject* value_obj, const mono_type& type) -> void*
 {
 	if (!type.valid())
 	{
@@ -43,10 +43,10 @@ auto to_mono_arg(MonoObject* value_obj, const mono_type& type) -> void*
 	}
 }
 
-auto to_mono_arg(const mono_object& value, const mono_type& type) -> void*
+auto to_managed_arg(const mono_object& value, const mono_type& type) -> void*
 {	
 	MonoObject* value_obj = value.get_internal_ptr();
-	return to_mono_arg(value_obj, type);
+	return to_managed_arg(value_obj, type);
 }
 
 } // namespace mono

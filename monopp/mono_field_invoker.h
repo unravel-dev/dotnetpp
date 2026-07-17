@@ -51,8 +51,8 @@ void mono_field_invoker<T>::set_value_impl(const mono_object* object, const T& v
 {
 	assert(field_);
 
-	auto mono_val = mono_converter<T>::to_mono(val);
-	auto arg = to_mono_arg(mono_val, type_);
+	auto mono_val = mono_converter<T>::to_managed(val);
+	auto arg = to_managed_arg(mono_val, type_);
 
 	if(object)
 	{
@@ -165,7 +165,7 @@ auto mono_field_invoker<T>::get_value_impl(const mono_object* object) const -> T
 
 	if(!is_valuetype())
 	{
-		val = mono_converter<T>::from_mono(refvalue);
+		val = mono_converter<T>::from_managed(refvalue);
 	}
 	return val;
 }
@@ -255,7 +255,7 @@ auto set_field_value(const mono_object& obj, const std::string& name, const T& v
 		invoker.set_value(obj, val);
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}
@@ -271,7 +271,7 @@ auto set_field_value(const mono_type& type, const std::string& name, const T& va
 		invoker.set_value(val);
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}
@@ -286,7 +286,7 @@ auto get_field_value(const mono_object& obj, const std::string& name, T& val) ->
 		val = invoker.get_value(obj);
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}
@@ -301,7 +301,7 @@ auto get_field_value(const mono_type& type, const std::string& name, T& val) -> 
 		val = invoker.get_value();
 		return true;
 	}
-	catch(const std::exception& e)
+	catch(const std::exception&)
 	{
 		return false;
 	}

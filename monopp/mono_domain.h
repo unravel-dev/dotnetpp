@@ -37,6 +37,22 @@ public:
 
 	auto get_name() const -> std::string;
 
+	auto get_version() const -> uint64_t;
+
+	/// True if both wrappers refer to the same MonoDomain.
+	auto equals(const mono_domain& other) const -> bool;
+
+	friend auto operator==(const mono_domain& a, const mono_domain& b) -> bool
+	{
+		return a.equals(b);
+	}
+
+	friend auto operator!=(const mono_domain& a, const mono_domain& b) -> bool
+	{
+		return !a.equals(b);
+	}
+
+	/// Backend pointer. Prefer equals() for identity checks.
 	auto get_internal_ptr() const -> MonoDomain*;
 
 private:

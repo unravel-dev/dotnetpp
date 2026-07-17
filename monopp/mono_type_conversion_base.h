@@ -35,13 +35,13 @@ struct mono_converter
 
 	static_assert(is_mono_valuetype<managed_type>::value, "Specialize converter for non-value types");
 
-	static auto to_mono(const native_type& obj) -> managed_type
+	static auto to_managed(const native_type& obj) -> managed_type
 	{
 		return obj;
 	}
 
 	template <typename U>
-	static auto from_mono(U obj) -> std::enable_if_t<std::is_same<U, MonoObject*>::value, native_type>
+	static auto from_managed(U obj) -> std::enable_if_t<std::is_same<U, MonoObject*>::value, native_type>
 	{
 		assert(check_type_layout<managed_type>(obj) && "Different type layouts");
 		void* ptr = mono_object_unbox(obj);
@@ -49,14 +49,14 @@ struct mono_converter
 	}
 
 	template <typename U>
-	static auto from_mono(const U& obj)
+	static auto from_managed(const U& obj)
 		-> std::enable_if_t<!std::is_same<U, MonoObject*>::value && !std::is_pointer<U>::value, const native_type&>
 	{
 		return obj;
 	}
 
 	template <typename U>
-	static auto from_mono(const U& ptr)
+	static auto from_managed(const U& ptr)
 		-> std::enable_if_t<!std::is_same<U, MonoObject*>::value && std::is_pointer<U>::value, native_type*>
 	{
 		return reinterpret_cast<native_type*>(ptr);
