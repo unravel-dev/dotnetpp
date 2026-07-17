@@ -329,7 +329,7 @@ void test_suite()
 			EXPECT(type.is_enum());
 
 			auto values = type.get_enum_values<int>();
-			EXPECT(values.size() == 3);
+			EXPECT(values.size() == 3u);
 
 			auto contains = [&](int value, const std::string& name)
 			{
@@ -410,7 +410,7 @@ void test_suite()
 			EXPECT(method.get_name() == std::string("Method5"));
 			EXPECT(!method.is_static());
 			EXPECT(method.get_visibility() == dotnet::visibility::vis_public);
-			EXPECT(method.get_param_types().size() == 2);
+			EXPECT(method.get_param_types().size() == 2u);
 			EXPECT(method.get_return_type().get_fullname() == std::string("System.String"));
 
 			// Signature based lookup.
@@ -1216,13 +1216,13 @@ void test_suite()
 			auto make_list = dotnet::make_method_invoker<dotnet::list<int>()>(type, "MakeList");
 			auto list = make_list();
 			EXPECT(list.valid());
-			EXPECT(list.size() == 3);
+			EXPECT(list.size() == 3u);
 			EXPECT(list.get(0) == 1);
 			EXPECT(list.get(2) == 3);
 
 			list.set(0, 42);
 			list.add(7);
-			EXPECT(list.size() == 4);
+			EXPECT(list.size() == 4u);
 			EXPECT(list.get(0) == 42);
 			EXPECT(list.get(3) == 7);
 
@@ -1230,7 +1230,7 @@ void test_suite()
 			EXPECT(sum_list(list) == 42 + 2 + 3 + 7);
 
 			list.remove_at(0);
-			EXPECT(list.size() == 3);
+			EXPECT(list.size() == 3u);
 			EXPECT(sum_list(list) == 2 + 3 + 7);
 
 			// Native side list construction.
@@ -1703,13 +1703,13 @@ void test_suite()
 
 			auto make_ints = dotnet::make_method_invoker<std::vector<int>()>(type, "MakeIntArray");
 			auto ints = make_ints();
-			EXPECT(ints.size() == 4);
+			EXPECT(ints.size() == 4u);
 			EXPECT(ints[0] == 1);
 			EXPECT(ints[3] == 4);
 
 			auto as_array = dotnet::make_method_invoker<dotnet::array<int>()>(type, "MakeIntArray");
 			auto managed_arr = as_array();
-			EXPECT(managed_arr.size() == 4);
+			EXPECT(managed_arr.size() == 4u);
 			EXPECT(managed_arr.get_element_type().get_fullname() == std::string("System.Int32"));
 
 			auto host = assembly.get_type("Tests", "ObjectArrayHost");
@@ -1717,7 +1717,7 @@ void test_suite()
 			auto make_objs =
 				dotnet::make_method_invoker<dotnet::array<dotnet::object>()>(make_method, false);
 			auto objs = make_objs();
-			EXPECT(objs.size() == 2);
+			EXPECT(objs.size() == 2u);
 			EXPECT(objs.get(0).valid());
 			EXPECT(objs.get(1).get_type().get_fullname() == std::string("Tests.MonoppTest"));
 
@@ -1739,21 +1739,21 @@ void test_suite()
 			auto make_list = dotnet::make_method_invoker<dotnet::list<int>()>(type, "MakeList");
 			auto list = make_list();
 			auto as_vector = list.to_vector();
-			EXPECT(as_vector.size() == 3);
+			EXPECT(as_vector.size() == 3u);
 			EXPECT(as_vector[1] == 2);
 
 			auto as_std_list = list.to_list();
-			EXPECT(as_std_list.size() == 3);
+			EXPECT(as_std_list.size() == 3u);
 			EXPECT(as_std_list.front() == 1);
 
 			list.clear();
-			EXPECT(list.size() == 0);
+			EXPECT(list.size() == 0u);
 
 			auto double_list =
 				dotnet::make_method_invoker<std::list<int>(std::list<int>)>(type, "DoubleList");
 			std::list<int> input = {1, 2, 3};
 			auto doubled = double_list(input);
-			EXPECT(doubled.size() == 3);
+			EXPECT(doubled.size() == 3u);
 			EXPECT(doubled.front() == 2);
 			EXPECT(doubled.back() == 6);
 		};
@@ -1768,14 +1768,14 @@ void test_suite()
 			dotnet::array<int> arr(values);
 			auto pinned_arr = dotnet::make_array_pinned(arr);
 			EXPECT(pinned_arr->is_locked());
-			EXPECT(pinned_arr->get_array().size() == 3);
+			EXPECT(pinned_arr->get_array().size() == 3u);
 
 			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
 			auto type = assembly.get_type("Tests", "MonoppTest");
 			auto list = dotnet::make_method_invoker<dotnet::list<int>()>(type, "MakeList")();
 			auto pinned_list = dotnet::make_list_pinned(list);
 			EXPECT(pinned_list->is_locked());
-			EXPECT(pinned_list->get_list().size() == 3);
+			EXPECT(pinned_list->get_list().size() == 3u);
 
 			auto obj = type.new_instance();
 			auto result = dotnet::with_pinned(obj,
@@ -1786,7 +1786,7 @@ void test_suite()
 
 			std::vector<dotnet::object> objs = {obj, type.new_instance()};
 			auto pins = dotnet::pin_vector_elements(objs);
-			EXPECT(pins.size() == 2);
+			EXPECT(pins.size() == 2u);
 			EXPECT(pins[0]->is_locked());
 		};
 		EXPECT_NOTHROWS(expression());

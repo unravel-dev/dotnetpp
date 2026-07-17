@@ -34,18 +34,18 @@ auto get_log_handler(const std::string& category) -> const log_handler&
 
 void log_message(const std::string& message, const std::string& category)
 {
-	const auto& handler = get_log_handler(category);
-	if(handler)
+	const auto* handler = find_handler(category);
+	if(handler && *handler)
 	{
-		handler(message);
+		(*handler)(message);
+		return;
 	}
-	else
+
+	static const std::string default_category{"default"};
+	const auto* default_handler = find_handler(default_category);
+	if(default_handler && *default_handler)
 	{
-		const auto& default_handler = get_log_handler("default");
-		if(default_handler)
-		{
-			default_handler(message);
-		}
+		(*default_handler)(message);
 	}
 }
 
