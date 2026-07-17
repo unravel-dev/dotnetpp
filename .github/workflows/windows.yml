@@ -31,9 +31,13 @@ jobs:
       uses: egor-tensin/setup-mingw@v2
       with:
         version: 12.2.0
-    - name: Setup Mono
-      run: |
-        choco install mono
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+    # - name: Setup Mono
+    #   run: |
+    #     choco install mono
     - name: Build
       run: |
         cmake --preset windows-${{matrix.config.arch}}-${{matrix.config.cc}}
