@@ -15,7 +15,9 @@
     <RootNamespace>Clrpp</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDependencyFile>false</GenerateDependencyFile>
-    <DebugType>portable</DebugType>
+    <Configuration>Release</Configuration>
+    <Configurations>Release</Configurations>
+    <Optimize>true</Optimize>
     <!-- NuGet dependencies (Mono.Cecil) must land next to the bridge dll. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
