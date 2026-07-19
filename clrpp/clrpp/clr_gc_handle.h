@@ -3,6 +3,7 @@
 #include "clr_config.h"
 
 #include "clr_array.h"
+#include "clr_domain.h"
 #include "clr_list.h"
 #include "clr_object.h"
 
@@ -36,11 +37,23 @@ public:
 	{
 		unlock();
 		handle_ = obj.get_managed_ptr();
+		// Stamp the domain identity at lock time so consumers can detect
+		// stale pins after a domain unload/reload.
+		domain_version_ = 0;
+		if(handle_)
+		{
+			const clr_domain* domain = clr_domain::get_current_domain_ptr();
+			if(domain)
+			{
+				domain_version_ = static_cast<intptr_t>(domain->get_version());
+			}
+		}
 	}
 
 	void unlock()
 	{
 		handle_ = {};
+		domain_version_ = 0;
 	}
 
 	auto is_locked() const -> bool
@@ -55,8 +68,7 @@ public:
 
 	auto get_domain_version() const -> intptr_t
 	{
-		// TODO: Implement this
-		return 0;
+		return domain_version_;
 	}
 
 	auto get_object() const -> clr_object
@@ -77,6 +89,7 @@ public:
 
 private:
 	managed_ptr handle_;
+	intptr_t domain_version_{};
 };
 
 using clr_object_pinned = clr_scoped_gc_handle;

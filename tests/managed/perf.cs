@@ -72,6 +72,15 @@ public class PerfTest
 		return a + b;
 	}
 
+	/// <summary>
+	/// Four-arg blittable static — Portable CreateDelegate stops at arity 3;
+	/// Compiled DynamicMethod covers this when IsDynamicCodeCompiled.
+	/// </summary>
+	public static int Add4(int a, int b, int c, int d)
+	{
+		return a + b + c + d;
+	}
+
 	public int AddInstance(int a, int b)
 	{
 		return a + b + counter;

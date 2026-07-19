@@ -76,6 +76,11 @@ auto clr_domain::get_current_domain() -> const clr_domain&
 	return *current_domain;
 }
 
+auto clr_domain::get_current_domain_ptr() -> const clr_domain*
+{
+	return current_domain;
+}
+
 void clr_domain::set_assemblies_path(const std::string& path)
 {
 	auto& paths = get_default_search_paths();

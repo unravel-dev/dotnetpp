@@ -45,14 +45,12 @@ public static partial class Bridge
             return false;
         }
 
-        // Open instance delegates need a reference-type `this`.
-        if (!method.IsStatic)
+        // Instance open-delegates cast `target` to DeclaringType, which can
+        // throw InvalidCastException across collectible ALC boundaries even
+        // when MethodInvoker succeeds. Only accelerate public static methods.
+        if (!method.IsStatic || !method.IsPublic)
         {
-            var declaring = method.DeclaringType;
-            if (declaring == null || declaring.IsValueType)
-            {
-                return false;
-            }
+            return false;
         }
 
         try

@@ -305,6 +305,19 @@ int main()
 					  dotnet::ignore(v);
 				  });
 
+			// Arity 4: Portable blittable binder caps at 3; Compiled path binds this.
+			auto add4 = dotnet::make_method_invoker<int(int, int, int, int)>(type, "Add4");
+			bench("n2m: invoke static int add4", 1000000,
+				  [&](std::int64_t n)
+				  {
+					  int acc = 0;
+					  for(std::int64_t i = 0; i < n; ++i)
+					  {
+						  acc += add4(static_cast<int>(i), 1, 2, 3);
+					  }
+					  dotnet::ignore(acc);
+				  });
+
 			auto echo_string = dotnet::make_method_invoker<std::string(std::string)>(type, "EchoString");
 			bench("n2m: invoke string echo", 200000,
 				  [&](std::int64_t n)

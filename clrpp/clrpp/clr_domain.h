@@ -55,6 +55,8 @@ public:
 	static void set_current_domain(const clr_domain& domain);
 	static void set_current_domain(const clr_domain* domain);
 	static auto get_current_domain() -> const clr_domain&;
+	/// Non-throwing; nullptr when no domain is current.
+	static auto get_current_domain_ptr() -> const clr_domain*;
 	static void set_assemblies_path(const std::string& path);
 
 private:
