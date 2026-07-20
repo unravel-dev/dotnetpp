@@ -131,7 +131,12 @@ public static partial class Bridge
         var declaring = field.DeclaringType;
         // Same restriction as the pre-split FastPath: OffsetOf is only used
         // for valuetypes. Class Auto layout must not go through pin+offset.
-        if (declaring == null || !declaring.IsValueType)
+        //
+        // The declaring value type itself must be blittable: this path pins the
+        // boxed target, and GCHandle.Alloc(Pinned) throws for a struct that
+        // carries references (or auto layout) even when the field being read is
+        // blittable. Fall through to FieldInfo.GetValue/SetValue in that case.
+        if (declaring == null || !declaring.IsValueType || !ClrLayout.IsBlittable(declaring))
         {
             return false;
         }

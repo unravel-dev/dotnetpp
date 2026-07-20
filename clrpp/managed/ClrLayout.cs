@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Clrpp
 {
@@ -74,6 +75,16 @@ internal static class ClrLayout
             var flag = new BlittableFlag();
             try
             {
+                // Auto-layout aggregates let the runtime reorder fields, so a
+                // raw byte copy would not match a native sequential struct.
+                // Primitives and enums are single-slot and always safe, even
+                // though the CLR reports some of them as auto-layout.
+                if (!t.IsPrimitive && !t.IsEnum && IsAutoLayout(t))
+                {
+                    flag.Value = false;
+                    return flag;
+                }
+
                 var check = IsReferenceOrContainsReferencesMethod.MakeGenericMethod(t);
                 flag.Value = !(bool)check.Invoke(null, null);
             }
@@ -84,6 +95,12 @@ internal static class ClrLayout
 
             return flag;
         }).Value;
+    }
+
+    private static bool IsAutoLayout(Type type)
+    {
+        var layout = type.StructLayoutAttribute;
+        return layout != null && layout.Value == LayoutKind.Auto;
     }
 
     // -----------------------------------------------------------------------

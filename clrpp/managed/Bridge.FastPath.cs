@@ -325,6 +325,11 @@ public static partial class Bridge
     // Exact-length pools: MethodBase.Invoke / MethodInvoker require argc == Length.
     [ThreadStatic] private static object[][] s_invokeArgsByArity;
 
+    // Tracks which pooled arity slots are currently rented on this thread so a
+    // reentrant invoke (managed callee calling back into the bridge) does not
+    // clobber a buffer still in use by the outer call.
+    [ThreadStatic] private static bool[] s_invokeArgsInUse;
+
     private static MethodInvokePlan GetMethodPlan(IntPtr methodHandle)
     {
         var method = Target<MethodBase>(methodHandle);
@@ -414,19 +419,36 @@ public static partial class Bridge
             s_invokeArgsByArity = pools;
         }
 
-        object[] buffer;
-        if (argc <= MaxCachedInvokeArity)
+        var inUse = s_invokeArgsInUse;
+        if (inUse == null)
         {
-            buffer = pools[argc];
+            inUse = new bool[MaxCachedInvokeArity + 1];
+            s_invokeArgsInUse = inUse;
+        }
+
+        // High-arity calls share a single oversized slot (index 0).
+        var slot = argc <= MaxCachedInvokeArity ? argc : 0;
+
+        // Reentrant use of the same slot on this thread: the pooled buffer is
+        // still live for the outer invoke, so return a fresh, non-pooled array
+        // rather than overwriting it.
+        if (inUse[slot])
+        {
+            return new object[argc];
+        }
+
+        object[] buffer;
+        if (slot != 0)
+        {
+            buffer = pools[slot];
             if (buffer == null)
             {
                 buffer = new object[argc];
-                pools[argc] = buffer;
+                pools[slot] = buffer;
             }
         }
         else
         {
-            // Rare high-arity calls: keep a single oversized slot and grow as needed.
             buffer = pools[0];
             if (buffer == null || buffer.Length != argc)
             {
@@ -435,6 +457,7 @@ public static partial class Bridge
             }
         }
 
+        inUse[slot] = true;
         Array.Clear(buffer, 0, argc);
         return buffer;
     }
@@ -447,6 +470,21 @@ public static partial class Bridge
         }
 
         Array.Clear(buffer, 0, argc);
+
+        // Only release the slot when returning the pooled buffer itself;
+        // reentrant calls received fresh arrays that were never pooled.
+        var pools = s_invokeArgsByArity;
+        var inUse = s_invokeArgsInUse;
+        if (pools == null || inUse == null)
+        {
+            return;
+        }
+
+        var slot = argc <= MaxCachedInvokeArity ? argc : 0;
+        if (ReferenceEquals(pools[slot], buffer))
+        {
+            inUse[slot] = false;
+        }
     }
 
     // Field get/set: Bridge.FieldAccess*.cs (Compiled → Portable).

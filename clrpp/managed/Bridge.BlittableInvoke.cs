@@ -256,6 +256,14 @@ public static partial class Bridge
 
         private static void Write<T>(NativeVariant* result, T value) where T : unmanaged
         {
+            // Caller discards the return value (e.g. a non-void method bound to
+            // a C++ void thunk, which passes a kind_empty result). The method
+            // already ran; just drop the value instead of demanding a buffer.
+            if (result->Kind == NativeVariant.KindEmpty)
+            {
+                return;
+            }
+
             if (result->Kind != NativeVariant.KindBlob || result->Data == IntPtr.Zero)
             {
                 throw new ArgumentException("Blittable invoke requires a blob result buffer");

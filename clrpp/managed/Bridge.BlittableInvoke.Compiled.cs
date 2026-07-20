@@ -136,6 +136,14 @@ public static partial class Bridge
     private static unsafe void CompiledBlittableWriteRet<T>(NativeVariant* result, T value)
         where T : unmanaged
     {
+        // Caller discards the return value (e.g. a non-void method bound to a
+        // C++ void thunk, which passes a kind_empty result). Match the portable
+        // path: the method already ran, so just drop the value.
+        if (result != null && result->Kind == NativeVariant.KindEmpty)
+        {
+            return;
+        }
+
         if (result == null || result->Kind != NativeVariant.KindBlob || result->Data == IntPtr.Zero)
         {
             throw new ArgumentException("Blittable invoke requires a blob result buffer");
