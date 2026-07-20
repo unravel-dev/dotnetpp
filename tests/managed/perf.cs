@@ -73,7 +73,7 @@ public class PerfTest
 	}
 
 	/// <summary>
-	/// Four-arg blittable static — Portable CreateDelegate stops at arity 3;
+	/// Four-arg blittable static — Portable CreateDelegate covers arity ≤ 8;
 	/// Compiled DynamicMethod covers this when IsDynamicCodeCompiled.
 	/// </summary>
 	public static int Add4(int a, int b, int c, int d)
