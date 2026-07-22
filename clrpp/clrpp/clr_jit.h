@@ -105,8 +105,12 @@ struct compiler_params
 	// Unsafe mode
 	bool unsafe{true};
 
-	// When generating XML docs (-doc), suppress CS1591/CS1587 (missing / misplaced comments).
+	// When generating XML docs (-doc), suppress XML documentation diagnostics
+	// (malformed/missing/mismatched param/cref/typeparam tags, etc.).
 	bool suppress_doc_warnings{false};
+
+	// Suppress CS0649 for fields filled by the engine/inspector rather than C# code.
+	bool suppress_unassigned_field_warnings{false};
 };
 
 struct compile_cmd

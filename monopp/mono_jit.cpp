@@ -351,8 +351,15 @@ auto create_compile_command(const compiler_params& params) -> std::string
 		command += quote(params.output_doc_name);
 		if(params.suppress_doc_warnings)
 		{
-			command += " -nowarn:1591,1587";
+			command +=
+				" -nowarn:1570,1571,1572,1573,1574,1580,1581,1584,1587,1589,1590,1591,1592,"
+				"1710,1711,1712,1723,1734,1735";
 		}
+	}
+
+	if(params.suppress_unassigned_field_warnings)
+	{
+		command += " -nowarn:0649";
 	}
 
 	if(params.debug)
@@ -437,8 +444,15 @@ auto create_compile_command_detailed(const compiler_params& params) -> compile_c
 		cmd.args.emplace_back("-doc:" + params.output_doc_name);
 		if(params.suppress_doc_warnings)
 		{
-			cmd.args.emplace_back("-nowarn:1591,1587");
+			cmd.args.emplace_back(
+				"-nowarn:1570,1571,1572,1573,1574,1580,1581,1584,1587,1589,1590,1591,1592,"
+				"1710,1711,1712,1723,1734,1735");
 		}
+	}
+
+	if(params.suppress_unassigned_field_warnings)
+	{
+		cmd.args.emplace_back("-nowarn:0649");
 	}
 
 	if(params.debug)
@@ -497,8 +511,14 @@ auto create_compile_rsp(const compiler_params& p) -> std::string
         rsp << "-doc:" << quote_if_needed(p.output_doc_name) << "\n";
         if(p.suppress_doc_warnings)
         {
-            rsp << "-nowarn:1591,1587\n";
+            rsp << "-nowarn:1570,1571,1572,1573,1574,1580,1581,1584,1587,1589,1590,1591,1592,"
+                   "1710,1711,1712,1723,1734,1735\n";
         }
+    }
+
+    if(p.suppress_unassigned_field_warnings)
+    {
+        rsp << "-nowarn:0649\n";
     }
 
     rsp << (p.debug ? "-debug\n" : "-optimize\n");

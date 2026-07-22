@@ -202,8 +202,17 @@ auto build_csc_args(const compiler_params& params, csc_arg_style style) -> std::
 		args.emplace_back("-doc:" + (rsp ? quote_if_needed(params.output_doc_name) : params.output_doc_name));
 		if(params.suppress_doc_warnings)
 		{
-			args.emplace_back("-nowarn:1591,1587");
+			// XML doc warnings: badly formed / param / cref / include / missing /
+			// typeparam / paramref (CS1570-CS1592, CS1710-CS1712, CS1723, CS1734-CS1735).
+			args.emplace_back(
+				"-nowarn:1570,1571,1572,1573,1574,1580,1581,1584,1587,1589,1590,1591,1592,"
+				"1710,1711,1712,1723,1734,1735");
 		}
+	}
+
+	if(params.suppress_unassigned_field_warnings)
+	{
+		args.emplace_back("-nowarn:0649");
 	}
 
 	args.emplace_back(params.debug ? "-debug:portable" : "-optimize");
