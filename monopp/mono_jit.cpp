@@ -347,8 +347,12 @@ auto create_compile_command(const compiler_params& params) -> std::string
 
 	if(!params.output_doc_name.empty())
 	{
-		command += "-doc:";
+		command += " -doc:";
 		command += quote(params.output_doc_name);
+		if(params.suppress_doc_warnings)
+		{
+			command += " -nowarn:1591,1587";
+		}
 	}
 
 	if(params.debug)
@@ -431,6 +435,10 @@ auto create_compile_command_detailed(const compiler_params& params) -> compile_c
 	if(!params.output_doc_name.empty())
 	{
 		cmd.args.emplace_back("-doc:" + params.output_doc_name);
+		if(params.suppress_doc_warnings)
+		{
+			cmd.args.emplace_back("-nowarn:1591,1587");
+		}
 	}
 
 	if(params.debug)
@@ -485,7 +493,13 @@ auto create_compile_rsp(const compiler_params& p) -> std::string
         rsp << "-out:" << quote_if_needed(p.output_name) << "\n";
 
     if (!p.output_doc_name.empty())
+    {
         rsp << "-doc:" << quote_if_needed(p.output_doc_name) << "\n";
+        if(p.suppress_doc_warnings)
+        {
+            rsp << "-nowarn:1591,1587\n";
+        }
+    }
 
     rsp << (p.debug ? "-debug\n" : "-optimize\n");
     if (p.unsafe)

@@ -72,6 +72,9 @@ struct compiler_params
 
 	// Unsafe mode
 	bool unsafe{true};
+
+	// When generating XML docs (-doc), suppress CS1591/CS1587 (missing / misplaced comments).
+	bool suppress_doc_warnings{false};
 };
 
 struct compile_cmd

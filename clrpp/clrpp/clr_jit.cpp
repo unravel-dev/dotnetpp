@@ -200,6 +200,10 @@ auto build_csc_args(const compiler_params& params, csc_arg_style style) -> std::
 	if(!params.output_doc_name.empty())
 	{
 		args.emplace_back("-doc:" + (rsp ? quote_if_needed(params.output_doc_name) : params.output_doc_name));
+		if(params.suppress_doc_warnings)
+		{
+			args.emplace_back("-nowarn:1591,1587");
+		}
 	}
 
 	args.emplace_back(params.debug ? "-debug:portable" : "-optimize");
