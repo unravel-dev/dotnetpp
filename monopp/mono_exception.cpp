@@ -84,7 +84,7 @@ auto extract_relevant_stack_frame(const std::string& input) -> stack_frame_info
 	// Explanation of the pattern:
 	//   ([^\s]+\.cs)  -> matches non-whitespace until ".cs"
 	//   :(\d+)        -> a literal colon, then one or more digits
-	std::regex cs_regex(R"(([^\s]+\.cs):(\d+))");
+	static const std::regex cs_regex(R"(([^\s]+\.cs):(\d+))");
 	std::smatch match;
 
 	std::istringstream iss(input);

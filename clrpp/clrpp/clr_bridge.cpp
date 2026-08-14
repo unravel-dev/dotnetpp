@@ -444,11 +444,23 @@ auto initialize(const std::string& assembly_dir,
 		return false;
 	}
 
+	// From here on a failure must release the hostfxr context, or a retried
+	// init would leak it.
+	auto close_context = [&s]()
+	{
+		if(s.context && s.close_fn)
+		{
+			s.close_fn(s.context);
+		}
+		s.context = nullptr;
+	};
+
 	void* load_assembly_ptr = nullptr;
 	rc = get_delegate_fn(s.context, hdt_load_assembly_and_get_function_pointer, &load_assembly_ptr);
 	if(rc != 0 || !load_assembly_ptr)
 	{
 		log_message("clrpp: failed to acquire load_assembly_and_get_function_pointer", "error");
+		close_context();
 		return false;
 	}
 
@@ -470,6 +482,7 @@ auto initialize(const std::string& assembly_dir,
 	{
 		log_message("clrpp: failed to bind Clrpp.Bridge.Bootstrap (hr=" + std::to_string(rc) + ")",
 					"error");
+		close_context();
 		return false;
 	}
 
@@ -483,6 +496,7 @@ auto initialize(const std::string& assembly_dir,
 		log_message("clrpp: bridge export count mismatch (native " + std::to_string(expected_count) +
 						" vs managed " + std::to_string(actual_count) + ")",
 					"error");
+		close_context();
 		return false;
 	}
 

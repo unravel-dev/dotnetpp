@@ -136,7 +136,15 @@ public static partial class Bridge
         // boxed target, and GCHandle.Alloc(Pinned) throws for a struct that
         // carries references (or auto layout) even when the field being read is
         // blittable. Fall through to FieldInfo.GetValue/SetValue in that case.
-        if (declaring == null || !declaring.IsValueType || !ClrLayout.IsBlittable(declaring))
+        //
+        // Marshal.OffsetOf reports the *interop-marshalled* layout while the
+        // copy runs against the pinned box (CLR layout). The two only provably
+        // coincide when no bool (1 byte CLR vs 4-byte BOOL) or char (utf16 vs
+        // ANSI byte) occurs anywhere in the field graph and the total sizes
+        // agree - otherwise a mismatched offset would silently corrupt
+        // neighboring fields.
+        if (declaring == null || !declaring.IsValueType || !ClrLayout.IsBlittable(declaring) ||
+            !HasInteropUniformLayout(declaring))
         {
             return false;
         }
@@ -145,6 +153,37 @@ public static partial class Bridge
         {
             offset = (int)Marshal.OffsetOf(declaring, field.Name);
             return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// True when the interop-marshalled layout of a value type provably
+    /// matches its CLR layout, making Marshal.OffsetOf valid against a pinned
+    /// box. Runs at plan-build time only.
+    private static bool HasInteropUniformLayout(Type type)
+    {
+        foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public |
+                                             BindingFlags.NonPublic))
+        {
+            var fieldType = field.FieldType;
+            if (fieldType == typeof(bool) || fieldType == typeof(char))
+            {
+                return false;
+            }
+
+            if (fieldType.IsValueType && !fieldType.IsPrimitive && !fieldType.IsEnum &&
+                !HasInteropUniformLayout(fieldType))
+            {
+                return false;
+            }
+        }
+
+        try
+        {
+            return Marshal.SizeOf(type) == ClrLayout.SizeOf(type);
         }
         catch
         {

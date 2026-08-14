@@ -151,6 +151,7 @@ auto clr_field::get_internal_ptr() const -> clr_handle
 
 void reset_field_cache()
 {
+	std::lock_guard<std::mutex> lock(meta_cache_mutex());
 	get_field_cache().clear();
 }
 

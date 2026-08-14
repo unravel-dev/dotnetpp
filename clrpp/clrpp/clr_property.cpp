@@ -172,6 +172,7 @@ auto clr_property::get_internal_ptr() const -> clr_handle
 
 void reset_property_cache()
 {
+	std::lock_guard<std::mutex> lock(meta_cache_mutex());
 	get_property_cache().clear();
 }
 

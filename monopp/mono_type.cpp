@@ -15,6 +15,7 @@ BEGIN_MONO_INCLUDE
 #include <mono/metadata/debug-helpers.h>
 END_MONO_INCLUDE
 #include <iostream>
+#include <mutex>
 
 
 namespace mono
@@ -42,8 +43,17 @@ auto get_type_cache() -> std::unordered_map<MonoClass*, std::shared_ptr<mono_typ
 	return type_cache;
 }
 
+// Guards this meta cache: wrappers are constructed off the main thread too
+// (e.g. compile jobs), and unordered_map mutation is a crash-grade race.
+auto get_meta_cache_mutex() -> std::mutex&
+{
+	static std::mutex m;
+	return m;
+}
+
 auto get_meta_info(MonoClass* cls) -> std::shared_ptr<mono_type::meta_info>
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_type_cache();
 	auto it = cache.find(cls);
 	if(it != cache.end())
@@ -55,6 +65,7 @@ auto get_meta_info(MonoClass* cls) -> std::shared_ptr<mono_type::meta_info>
 
 void set_meta_info(MonoClass* cls, std::shared_ptr<mono_type::meta_info> meta)
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_type_cache();
 	cache[cls] = meta;
 }
@@ -1000,6 +1011,7 @@ auto mono_type::is_list() const -> bool
 }
 void reset_type_cache()
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_type_cache();
 	cache.clear();
 }

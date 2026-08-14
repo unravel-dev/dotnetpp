@@ -234,11 +234,14 @@ public static partial class Bridge
         };
     }
 
-    private static unsafe bool ArgsAreBlobs(NativeVariant* args, int argc)
+    private static unsafe bool ArgsAreBlobs(NativeVariant* args, int argc, int[] requiredSizes)
     {
         for (int i = 0; i < argc; i++)
         {
-            if (args[i].Kind != NativeVariant.KindBlob || args[i].Data == IntPtr.Zero)
+            // Undersized blobs fall through to the slow path, which raises a
+            // proper size error instead of reading out of bounds here.
+            if (args[i].Kind != NativeVariant.KindBlob || args[i].Data == IntPtr.Zero ||
+                args[i].Size < requiredSizes[i])
             {
                 return false;
             }

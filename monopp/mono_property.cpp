@@ -3,6 +3,7 @@
 #include "mono_method.h"
 #include "mono_object.h"
 
+#include <mutex>
 #include <unordered_map>
 
 BEGIN_MONO_INCLUDE
@@ -29,8 +30,17 @@ auto get_property_cache() -> std::unordered_map<MonoProperty*, std::shared_ptr<m
 	return property_cache;
 }
 
+// Guards this meta cache: wrappers are constructed off the main thread too
+// (e.g. compile jobs), and unordered_map mutation is a crash-grade race.
+auto get_meta_cache_mutex() -> std::mutex&
+{
+	static std::mutex m;
+	return m;
+}
+
 auto get_meta_info(MonoProperty* property) -> std::shared_ptr<mono_property::meta_info>
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_property_cache();
 	auto it = cache.find(property);
 	if(it != cache.end())
@@ -42,6 +52,7 @@ auto get_meta_info(MonoProperty* property) -> std::shared_ptr<mono_property::met
 
 void set_meta_info(MonoProperty* property, std::shared_ptr<mono_property::meta_info> meta)
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_property_cache();
 	cache[property] = meta;
 }
@@ -269,6 +280,7 @@ auto mono_property::has_default() const -> bool
 }
 void reset_property_cache()
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_property_cache();
 	cache.clear();
 }

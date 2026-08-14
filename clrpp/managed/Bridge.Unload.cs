@@ -94,7 +94,7 @@ public static partial class Bridge
 
         RunStaticsCleanup();
         PurgeInternedHandles(alc);
-        ArrayPinCache.ReleaseAllLongLived();
+        ArrayPinCache.ReleaseAll();
 
         GCHandle.FromIntPtr(domainHandle).Free();
 

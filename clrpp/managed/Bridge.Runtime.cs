@@ -59,6 +59,29 @@ internal sealed class ClrppLoadContext : AssemblyLoadContext
             {
                 SharedAssemblies.Remove(key);
             }
+
+            // Re-register survivors. During hot reload the new context loads
+            // its recompiled assembly while the old entry still owns the name
+            // (first-loaded wins), so without this the name would map to
+            // nothing after the old context unloads and the next cross-context
+            // resolve would load a third private copy with a split type
+            // identity.
+            foreach (var alc in All)
+            {
+                if (alc is not ClrppLoadContext survivor || survivor == context)
+                {
+                    continue;
+                }
+
+                foreach (var assembly in survivor.Assemblies)
+                {
+                    var name = assembly.GetName().Name;
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        SharedAssemblies.TryAdd(name, assembly);
+                    }
+                }
+            }
         }
     }
 
@@ -366,6 +389,13 @@ public static partial class Bridge
             }
 
             return ex.Types.Where(t => t != null);
+        }
+        catch (Exception ex)
+        {
+            // Any other load failure (missing file, bad image) must not
+            // escape into an UnmanagedCallersOnly export frame.
+            Log($"Assembly.GetTypes failed for '{assembly.GetName().Name}': {ex.Message}", "error");
+            return Array.Empty<Type>();
         }
     }
 

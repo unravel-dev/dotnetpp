@@ -40,11 +40,13 @@ auto has_compatible_signature(const clr_method& method) -> bool
 	{
 		return false;
 	}
-	compatible &= is_compatible_type<return_type>(expected_rtype);
-	if(!compatible)
+	if(!is_compatible_type<return_type>(expected_rtype))
 	{
-		// allow cpp return type to be void i.e ignoring it.
-		if(!is_compatible_type<void>(expected_rtype))
+		// A void C++ signature may ignore the managed return value (the
+		// invoker discards the result handle); any other mismatch is an
+		// error. Exempting void *methods* instead would accept e.g. an
+		// int() invoker on a void method and hand back a garbage default.
+		if(!std::is_void<return_type>::value)
 		{
 			return false;
 		}
@@ -150,6 +152,10 @@ template <typename... Args>
 class clr_method_invoker<void(Args...)> : public clr_method
 {
 public:
+	/// Constructs an invalid invoker (operator() throws); assign one obtained
+	/// through make_method_invoker, which performs the signature check.
+	clr_method_invoker() = default;
+
 	void operator()(Args... args)
 	{
 		invoke(nullptr, std::forward<Args>(args)...);
@@ -197,6 +203,10 @@ template <typename RetType, typename... Args>
 class clr_method_invoker<RetType(Args...)> : public clr_method
 {
 public:
+	/// Constructs an invalid invoker (operator() throws); assign one obtained
+	/// through make_method_invoker, which performs the signature check.
+	clr_method_invoker() = default;
+
 	auto operator()(Args... args)
 	{
 		return invoke(nullptr, std::forward<Args>(args)...);
@@ -255,19 +265,28 @@ auto make_method_invoker(const clr_type& type, const std::string& name) -> clr_m
 {
 	using arg_types = typename function_traits<Signature>::arg_types;
 	auto args_result = types::get_args_signature<arg_types>();
-	auto all_types_known = args_result.second;
+	constexpr auto arg_count = function_traits<Signature>::arity;
 
-	if(all_types_known)
+	if(args_result.second)
 	{
-		auto func = type.get_method(name + "(" + args_result.first + ")");
-		return make_method_invoker<Signature>(func);
+		// Exact-signature lookup first: it selects the right overload when
+		// several share the arity. It can still miss for parameters whose
+		// managed type has no C++ name mapping (e.g. an enum declared as its
+		// underlying integer on the C++ side), so fall back to name+arity -
+		// the signature compatibility check in make_method_invoker still
+		// validates the fallback.
+		try
+		{
+			auto func = type.get_method(name + "(" + args_result.first + ")");
+			return make_method_invoker<Signature>(func);
+		}
+		catch(const clr_exception&)
+		{
+		}
 	}
-	else
-	{
-		constexpr auto arg_count = function_traits<Signature>::arity;
-		auto func = type.get_method(name, arg_count);
-		return make_method_invoker<Signature>(func);
-	}
+
+	auto func = type.get_method(name, arg_count);
+	return make_method_invoker<Signature>(func);
 }
 
 template <typename Signature>

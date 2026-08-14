@@ -176,6 +176,7 @@ auto clr_method::get_internal_ptr() const -> clr_handle
 
 void reset_method_cache()
 {
+	std::lock_guard<std::mutex> lock(meta_cache_mutex());
 	get_method_cache().clear();
 }
 

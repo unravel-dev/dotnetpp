@@ -81,13 +81,30 @@ public static partial class Bridge
             return IntPtr.Zero;
         }
 
-        return InternedHandles.GetOrAdd(obj, static o =>
+        while (true)
         {
-            var handle = GCHandle.Alloc(o);
+            if (InternedHandles.TryGetValue(obj, out var existing))
+            {
+                return existing;
+            }
+
+            // Allocate outside any GetOrAdd factory: factories can race, and a
+            // loser's handle published only in the reverse map would be a
+            // strong handle nothing ever frees (permanently rooting a
+            // collectible context). Publish the reverse entry first so
+            // FreeHandle can never free the winner mid-registration, and take
+            // it back before freeing on a lost race.
+            var handle = GCHandle.Alloc(obj);
             var ptr = GCHandle.ToIntPtr(handle);
             InternedHandlesReverse[ptr] = handle;
-            return ptr;
-        });
+            if (InternedHandles.TryAdd(obj, ptr))
+            {
+                return ptr;
+            }
+
+            InternedHandlesReverse.TryRemove(ptr, out _);
+            handle.Free();
+        }
     }
 
     internal static IntPtr NewObjectHandle(object obj)

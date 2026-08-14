@@ -2,6 +2,7 @@
 #include "mono_exception.h"
 #include "mono_type.h"
 
+#include <mutex>
 #include <unordered_map>
 
 BEGIN_MONO_INCLUDE
@@ -28,8 +29,17 @@ auto get_method_cache() -> std::unordered_map<MonoMethod*, std::shared_ptr<mono_
 	return method_cache;
 }
 
+// Guards this meta cache: wrappers are constructed off the main thread too
+// (e.g. compile jobs), and unordered_map mutation is a crash-grade race.
+auto get_meta_cache_mutex() -> std::mutex&
+{
+	static std::mutex m;
+	return m;
+}
+
 auto get_meta_info(MonoMethod* method) -> std::shared_ptr<mono_method::meta_info>
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_method_cache();
 	auto it = cache.find(method);
 	if(it != cache.end())
@@ -41,6 +51,7 @@ auto get_meta_info(MonoMethod* method) -> std::shared_ptr<mono_method::meta_info
 
 void set_meta_info(MonoMethod* method, std::shared_ptr<mono_method::meta_info> meta)
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_method_cache();
 	cache[method] = meta;
 }
@@ -328,6 +339,7 @@ mono_method::operator bool() const
 }
 void reset_method_cache()
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_method_cache();
 	cache.clear();
 }

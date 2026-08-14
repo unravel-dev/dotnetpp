@@ -141,7 +141,7 @@ public static partial class Bridge
             // Blittable CreateDelegate path: no object[] / no boxing.
             if (plan.BlittableInvoke != null &&
                 plan.BlittableArgc == argc &&
-                (argc == 0 || ArgsAreBlobs(args, argc)) &&
+                (argc == 0 || ArgsAreBlobs(args, argc, plan.BlittableArgSizes)) &&
                 (result->Kind == NativeVariant.KindBlob || result->Kind == NativeVariant.KindEmpty))
             {
                 var target = Target(targetHandle);
@@ -382,6 +382,40 @@ public static partial class Bridge
         }
     }
 
+    private static unsafe long CopyOut(IntPtr data, long total, long byteOffset, IntPtr dest, long byteCount)
+    {
+        if (byteOffset > total)
+        {
+            return -1;
+        }
+
+        var count = Math.Min(byteCount, total - byteOffset);
+        if (count == 0)
+        {
+            return 0;
+        }
+
+        Buffer.MemoryCopy((byte*)data + byteOffset, (void*)dest, byteCount, count);
+        return count;
+    }
+
+    private static unsafe long CopyIn(IntPtr data, long total, long byteOffset, IntPtr src, long byteCount)
+    {
+        if (byteOffset > total)
+        {
+            return -1;
+        }
+
+        var count = Math.Min(byteCount, total - byteOffset);
+        if (count == 0)
+        {
+            return 0;
+        }
+
+        Buffer.MemoryCopy((void*)src, (byte*)data + byteOffset, total - byteOffset, count);
+        return count;
+    }
+
     /// Bulk copy out of a blittable-element array. Returns bytes copied or -1.
     [UnmanagedCallersOnly]
     public static unsafe long ArrayCopyTo(IntPtr arrayHandle, long byteOffset, IntPtr dest, long byteCount)
@@ -393,21 +427,26 @@ public static partial class Bridge
 
         try
         {
-            var pin = ArrayPinCache.Pin(array, arrayHandle);
-            var total = ArrayPinCache.ByteLength(array);
-            if (byteOffset > total)
+            // Reuse a long-lived pin when one exists (or this handle keeps
+            // getting copied); otherwise pin only for the duration of this
+            // copy (scope-local, cannot leak/alias).
+            if (ArrayPinCache.TryGetLive(arrayHandle, out var pin) ||
+                (ArrayPinCache.ShouldPromote(arrayHandle) &&
+                 ArrayPinCache.TryAcquire(arrayHandle, array, out pin)))
             {
-                return -1;
+                return CopyOut(pin.Data, pin.ByteLength, byteOffset, dest, byteCount);
             }
 
-            var count = Math.Min(byteCount, total - byteOffset);
-            if (count == 0)
+            var total = array.LongLength * ClrLayout.SizeOf(array.GetType().GetElementType());
+            var transient = GCHandle.Alloc(array, GCHandleType.Pinned);
+            try
             {
-                return 0;
+                return CopyOut(transient.AddrOfPinnedObject(), total, byteOffset, dest, byteCount);
             }
-
-            Buffer.MemoryCopy((byte*)pin.AddrOfPinnedObject() + byteOffset, (void*)dest, byteCount, count);
-            return count;
+            finally
+            {
+                transient.Free();
+            }
         }
         catch (Exception ex)
         {
@@ -427,21 +466,23 @@ public static partial class Bridge
 
         try
         {
-            var pin = ArrayPinCache.Pin(array, arrayHandle);
-            var total = ArrayPinCache.ByteLength(array);
-            if (byteOffset > total)
+            if (ArrayPinCache.TryGetLive(arrayHandle, out var pin) ||
+                (ArrayPinCache.ShouldPromote(arrayHandle) &&
+                 ArrayPinCache.TryAcquire(arrayHandle, array, out pin)))
             {
-                return -1;
+                return CopyIn(pin.Data, pin.ByteLength, byteOffset, src, byteCount);
             }
 
-            var count = Math.Min(byteCount, total - byteOffset);
-            if (count == 0)
+            var total = array.LongLength * ClrLayout.SizeOf(array.GetType().GetElementType());
+            var transient = GCHandle.Alloc(array, GCHandleType.Pinned);
+            try
             {
-                return 0;
+                return CopyIn(transient.AddrOfPinnedObject(), total, byteOffset, src, byteCount);
             }
-
-            Buffer.MemoryCopy((void*)src, (byte*)pin.AddrOfPinnedObject() + byteOffset, total - byteOffset, count);
-            return count;
+            finally
+            {
+                transient.Free();
+            }
         }
         catch (Exception ex)
         {

@@ -20,245 +20,155 @@ public static partial class Bridge
     // Array pin cache
     // ---------------------------------------------------------------------
     //
-    // Two layers:
-    //   1) Thread-local pin reused by ArrayCopyTo/From (short-lived, one
-    //      array at a time on this thread).
-    //   2) Long-lived pins keyed by the array's strong-handle IntPtr, used by
-    //      ArrayPinAcquire so native clr_array get/set can memcpy without
-    //      re-entering the bridge. Released on ArrayPinRelease / FreeHandle.
+    // Long-lived pins for native pointer access (ArrayPinAcquire): one pinned
+    // GCHandle per array strong-handle key, released on ArrayPinRelease /
+    // FreeHandle / domain unload. Entries are claimed for release with an
+    // atomic flag so a pin is freed exactly once, from whichever thread
+    // releases it. GCHandle structs are never copied into thread-local or
+    // per-caller state: a stale copy can alias a recycled handle slot and
+    // read/write an unrelated object. Readers use the data pointer cached at
+    // creation (pinned objects do not move) and never touch the GCHandle.
+    //
+    // Bulk copies (ArrayCopyTo/From) reuse a long-lived pin when one exists
+    // and otherwise pin transiently for the duration of the single copy - a
+    // scope-local pin is cheaper than registry churn for one-shot temp
+    // arrays and cannot leak or alias.
     // ---------------------------------------------------------------------
 
-    private sealed class LongLivedArrayPin
+    private sealed class ArrayPin
     {
         public GCHandle Pin;
+        public IntPtr Data;
         public int ElementSize;
         public long ByteLength;
+        private int released;
+
+        public bool IsLive => System.Threading.Volatile.Read(ref released) == 0;
+
+        /// Frees the pin exactly once; safe to race from multiple threads.
+        public void Release()
+        {
+            if (System.Threading.Interlocked.Exchange(ref released, 1) == 0)
+            {
+                Pin.Free();
+            }
+        }
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, LongLivedArrayPin>
-        LongLivedPins = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<IntPtr, ArrayPin>
+        ArrayPins = new();
 
     private static class ArrayPinCache
     {
-        [ThreadStatic] private static IntPtr s_handle;
-        [ThreadStatic] private static GCHandle s_pin;
-        [ThreadStatic] private static int s_elementSize;
-        [ThreadStatic] private static long s_byteLength;
-
-        internal static GCHandle Pin(Array array, IntPtr arrayHandle)
+        /// Registry lookup only (no creation); used by the bulk-copy paths so
+        /// they cooperate with pins native already holds pointers into.
+        internal static bool TryGetLive(IntPtr arrayHandle, out ArrayPin pin)
         {
-            if (s_handle == arrayHandle && s_pin.IsAllocated)
+            return ArrayPins.TryGetValue(arrayHandle, out pin) && pin.IsLive;
+        }
+
+        // Bulk-copy promotion heuristic: the first copy for a handle pins
+        // transiently; a repeat copy of the same handle promotes into the
+        // registry so steady-state repeated copies reuse one pin. Only an
+        // IntPtr is cached per thread - never GCHandles or object refs, so a
+        // stale value can at worst promote a fresh array one copy early.
+        [ThreadStatic] private static IntPtr s_lastCopyHandle;
+
+        internal static bool ShouldPromote(IntPtr arrayHandle)
+        {
+            if (s_lastCopyHandle == arrayHandle)
             {
-                return s_pin;
+                return true;
             }
 
-            // Prefer an already-acquired long-lived pin for this handle so we
-            // do not double-pin the same array on the copy path.
-            if (LongLivedPins.TryGetValue(arrayHandle, out var lived) && lived.Pin.IsAllocated)
+            s_lastCopyHandle = arrayHandle;
+            return false;
+        }
+
+        internal static bool TryAcquire(IntPtr arrayHandle, Array array, out ArrayPin pin)
+        {
+            while (true)
             {
-                // Drop any TLS-owned pin before aliasing the long-lived one.
-                if (s_handle != arrayHandle || !IsAliasingLongLived())
+                if (ArrayPins.TryGetValue(arrayHandle, out pin))
                 {
-                    ReleaseCurrent();
+                    if (pin.IsLive)
+                    {
+                        return true;
+                    }
+
+                    // Released concurrently; drop exactly that dead entry
+                    // (a plain TryRemove could take out a newer live pin).
+                    ((System.Collections.Generic.ICollection<System.Collections.Generic.KeyValuePair<IntPtr, ArrayPin>>)ArrayPins)
+                        .Remove(new System.Collections.Generic.KeyValuePair<IntPtr, ArrayPin>(arrayHandle, pin));
+                    continue;
                 }
 
-                s_handle = arrayHandle;
-                s_pin = lived.Pin;
-                s_elementSize = lived.ElementSize;
-                s_byteLength = lived.ByteLength;
-                return s_pin;
+                var elementType = array.GetType().GetElementType();
+                if (elementType == null || !ClrLayout.IsBlittable(elementType))
+                {
+                    pin = null;
+                    return false;
+                }
+
+                ArrayPin fresh;
+                try
+                {
+                    var size = ClrLayout.SizeOf(elementType);
+                    var handle = GCHandle.Alloc(array, GCHandleType.Pinned);
+                    fresh = new ArrayPin
+                    {
+                        Pin = handle,
+                        Data = handle.AddrOfPinnedObject(),
+                        ElementSize = size,
+                        ByteLength = array.LongLength * size
+                    };
+                }
+                catch (ArgumentException)
+                {
+                    // Element type not pinnable (contains references).
+                    pin = null;
+                    return false;
+                }
+
+                if (ArrayPins.TryAdd(arrayHandle, fresh))
+                {
+                    pin = fresh;
+                    return true;
+                }
+
+                // Lost an insert race: free ours and retry with the winner's.
+                fresh.Release();
             }
-
-            ReleaseCurrent();
-            s_pin = GCHandle.Alloc(array, GCHandleType.Pinned);
-            s_handle = arrayHandle;
-            s_elementSize = 0;
-            s_byteLength = -1;
-            return s_pin;
-        }
-
-        private static bool IsAliasingLongLived()
-        {
-            return s_handle != IntPtr.Zero && LongLivedPins.ContainsKey(s_handle);
-        }
-
-        private static void SafeFreePin(ref GCHandle pin)
-        {
-            if (!pin.IsAllocated)
-            {
-                return;
-            }
-
-            try
-            {
-                pin.Free();
-            }
-            catch (InvalidOperationException)
-            {
-                // Already freed on another path (TLS alias vs long-lived).
-            }
-
-            pin = default;
-        }
-
-        internal static int ElementSize(Array array)
-        {
-            if (s_elementSize > 0)
-            {
-                return s_elementSize;
-            }
-
-            s_elementSize = ClrLayout.SizeOf(array.GetType().GetElementType());
-            return s_elementSize;
-        }
-
-        internal static long ByteLength(Array array)
-        {
-            if (s_byteLength >= 0)
-            {
-                return s_byteLength;
-            }
-
-            s_byteLength = array.LongLength * ElementSize(array);
-            return s_byteLength;
         }
 
         internal static void Release(IntPtr arrayHandle)
         {
-            var livedPin = default(GCHandle);
-            var hadLongLived = LongLivedPins.TryGetValue(arrayHandle, out var lived);
-            if (hadLongLived)
+            // No emptiness pre-check: ConcurrentDictionary.IsEmpty acquires
+            // every bucket lock when the dictionary IS empty, which made this
+            // (called from FreeHandle, i.e. per released object) an order of
+            // magnitude slower than the single-bucket TryRemove miss.
+            if (ArrayPins.TryRemove(arrayHandle, out var pin))
             {
-                livedPin = lived.Pin;
+                pin.Release();
             }
-
-            ReleaseLongLived(arrayHandle);
-
-            if (s_handle != arrayHandle)
-            {
-                return;
-            }
-
-            // ReleaseLongLived usually clears TLS; if not (e.g. missed), finish here.
-            if (s_pin.IsAllocated && (hadLongLived && s_pin.Equals(livedPin) || IsAliasingLongLived()))
-            {
-                s_handle = IntPtr.Zero;
-                s_pin = default;
-                s_elementSize = 0;
-                s_byteLength = -1;
-            }
-            else
-            {
-                ReleaseCurrent();
-            }
-        }
-
-        internal static void ReleaseCurrent()
-        {
-            // Only free when TLS owns the pin; aliases of long-lived pins must not.
-            if (s_pin.IsAllocated && !IsAliasingLongLived())
-            {
-                SafeFreePin(ref s_pin);
-            }
-
-            s_handle = IntPtr.Zero;
-            s_pin = default;
-            s_elementSize = 0;
-            s_byteLength = -1;
-        }
-
-        internal static bool TryAcquireLongLived(IntPtr arrayHandle, Array array,
-                                                 out IntPtr data, out int elementSize, out long byteLength)
-        {
-            data = IntPtr.Zero;
-            elementSize = 0;
-            byteLength = 0;
-
-            var elementType = array.GetType().GetElementType();
-            if (elementType == null || !ClrLayout.IsBlittable(elementType))
-            {
-                return false;
-            }
-
-            // ArrayCopy may already hold a TLS-owned pin for this handle. Drop it
-            // before allocating a long-lived pin so FreeHandle cannot orphan the TLS one.
-            if (s_handle == arrayHandle && s_pin.IsAllocated && !IsAliasingLongLived())
-            {
-                ReleaseCurrent();
-            }
-
-            var lived = LongLivedPins.GetOrAdd(arrayHandle, _ =>
-            {
-                var size = ClrLayout.SizeOf(elementType);
-                return new LongLivedArrayPin
-                {
-                    Pin = GCHandle.Alloc(array, GCHandleType.Pinned),
-                    ElementSize = size,
-                    ByteLength = array.LongLength * size
-                };
-            });
-
-            if (!lived.Pin.IsAllocated)
-            {
-                LongLivedPins.TryRemove(arrayHandle, out _);
-                return false;
-            }
-
-            // TLS should alias the long-lived pin (not a second owned pin).
-            s_handle = arrayHandle;
-            s_pin = lived.Pin;
-            s_elementSize = lived.ElementSize;
-            s_byteLength = lived.ByteLength;
-
-            data = lived.Pin.AddrOfPinnedObject();
-            elementSize = lived.ElementSize;
-            byteLength = lived.ByteLength;
-            return true;
-        }
-
-        internal static void ReleaseLongLived(IntPtr arrayHandle)
-        {
-            if (!LongLivedPins.TryRemove(arrayHandle, out var lived))
-            {
-                return;
-            }
-
-            if (s_handle == arrayHandle)
-            {
-                // Free a TLS-owned pin that is not the long-lived one (orphan guard).
-                if (s_pin.IsAllocated && !s_pin.Equals(lived.Pin))
-                {
-                    SafeFreePin(ref s_pin);
-                }
-
-                s_handle = IntPtr.Zero;
-                s_pin = default;
-                s_elementSize = 0;
-                s_byteLength = -1;
-            }
-
-            SafeFreePin(ref lived.Pin);
         }
 
         /// <summary>
-        /// Drop every long-lived array pin. Required before ALC unload so
-        /// pinned handles cannot root collectible assemblies.
+        /// Drop every array pin. Required before ALC unload so pinned handles
+        /// cannot root collectible assemblies.
         /// </summary>
-        internal static void ReleaseAllLongLived()
+        internal static void ReleaseAll()
         {
-            var keys = LongLivedPins.Keys.ToArray();
+            var keys = ArrayPins.Keys.ToArray();
             if (keys.Length > 0)
             {
-                Log($"releasing {keys.Length} long-lived array pin(s) before domain unload", "trace");
+                Log($"releasing {keys.Length} array pin(s) before domain unload", "trace");
             }
 
             foreach (var key in keys)
             {
-                ReleaseLongLived(key);
+                Release(key);
             }
-
-            LongLivedPins.Clear();
-            ReleaseCurrent();
         }
     }
 
@@ -287,15 +197,14 @@ public static partial class Bridge
             return 0;
         }
 
-        if (!ArrayPinCache.TryAcquireLongLived(arrayHandle, array, out var data, out var elemSize,
-                                               out var byteLength))
+        if (!ArrayPinCache.TryAcquire(arrayHandle, array, out var pin))
         {
             return 0;
         }
 
-        info->Data = data;
-        info->ByteLength = byteLength;
-        info->ElementSize = elemSize;
+        info->Data = pin.Data;
+        info->ByteLength = pin.ByteLength;
+        info->ElementSize = pin.ElementSize;
         info->Reserved = 0;
         return 1;
     }
@@ -303,7 +212,7 @@ public static partial class Bridge
     [UnmanagedCallersOnly]
     public static void ArrayPinRelease(IntPtr arrayHandle)
     {
-        ArrayPinCache.ReleaseLongLived(arrayHandle);
+        ArrayPinCache.Release(arrayHandle);
     }
 
     // ---------------------------------------------------------------------
@@ -318,6 +227,9 @@ public static partial class Bridge
         public ConstructorInvoker ConstructorInvoker;
         public BlittableCall BlittableInvoke;
         public int BlittableArgc = -1;
+        /// Per-parameter CLR sizes for the blittable path, so the dispatch
+        /// gate can reject undersized native blobs before any unchecked read.
+        public int[] BlittableArgSizes;
     }
 
     private static readonly ConditionalWeakTable<MethodBase, MethodInvokePlan> MethodPlans = new();
@@ -362,6 +274,8 @@ public static partial class Bridge
                 {
                     plan.BlittableInvoke = blittable;
                     plan.BlittableArgc = plan.Parameters.Length;
+                    plan.BlittableArgSizes = Array.ConvertAll(
+                        plan.Parameters, static p => ClrLayout.SizeOf(p.ParameterType));
                 }
             }
         }

@@ -176,14 +176,28 @@ public static partial class Bridge
         }
 
         var enumNames = Enum.GetNames(type);
-        var enumValues = Enum.GetValues(type);
+        // Underlying-typed values, converted unchecked: Convert.ToInt64 on a
+        // boxed enum member throws OverflowException for ulong members above
+        // long.MaxValue, which would fail-fast out of UnmanagedCallersOnly.
+        var enumValues = Enum.GetValuesAsUnderlyingType(type);
 
         if (values != null && names != null)
         {
             var count = Math.Min(capacity, enumNames.Length);
             for (int i = 0; i < count; i++)
             {
-                values[i] = Convert.ToInt64(enumValues.GetValue(i));
+                values[i] = unchecked(enumValues.GetValue(i) switch
+                {
+                    sbyte v => v,
+                    byte v => v,
+                    short v => v,
+                    ushort v => v,
+                    int v => v,
+                    uint v => v,
+                    long v => v,
+                    ulong v => (long)v,
+                    _ => 0L
+                });
                 names[i] = AllocUtf8(enumNames[i]);
             }
         }
@@ -331,55 +345,35 @@ public static partial class Bridge
             return IntPtr.Zero;
         }
 
-        for (var t = type; t != null; t = t.BaseType)
+        // Member enumeration and GetParameters can throw TypeLoadException /
+        // FileNotFoundException when a signature references a type from an
+        // assembly missing in a partial deploy; that must not escape an
+        // UnmanagedCallersOnly export (process fail-fast).
+        try
         {
-            MethodBase chosen = null;
-            var chosenIsPublic = false;
-            var chosenToken = int.MaxValue;
-
-            foreach (var method in t.GetMethods(AllDeclared))
+            for (var t = type; t != null; t = t.BaseType)
             {
-                if (method.Name != name)
-                {
-                    continue;
-                }
+                MethodBase chosen = null;
+                var chosenIsPublic = false;
+                var chosenToken = int.MaxValue;
 
-                if (argc >= 0 && method.GetParameters().Length != argc)
+                foreach (var method in t.GetMethods(AllDeclared))
                 {
-                    continue;
-                }
-
-                if (IsBetterMethodCandidate(method, chosen, chosenIsPublic, chosenToken))
-                {
-                    chosen = method;
-                    chosenIsPublic = method.IsPublic;
-                    chosenToken = method.MetadataToken;
-                }
-            }
-
-            if (chosen != null)
-            {
-                return Intern(chosen);
-            }
-
-            // Constructors are exposed as ".ctor" like in mono.
-            if (name == ".ctor")
-            {
-                chosen = null;
-                chosenIsPublic = false;
-                chosenToken = int.MaxValue;
-                foreach (var ctor in t.GetConstructors(AllDeclared))
-                {
-                    if (argc >= 0 && ctor.GetParameters().Length != argc)
+                    if (method.Name != name)
                     {
                         continue;
                     }
 
-                    if (IsBetterMethodCandidate(ctor, chosen, chosenIsPublic, chosenToken))
+                    if (argc >= 0 && method.GetParameters().Length != argc)
                     {
-                        chosen = ctor;
-                        chosenIsPublic = ctor.IsPublic;
-                        chosenToken = ctor.MetadataToken;
+                        continue;
+                    }
+
+                    if (IsBetterMethodCandidate(method, chosen, chosenIsPublic, chosenToken))
+                    {
+                        chosen = method;
+                        chosenIsPublic = method.IsPublic;
+                        chosenToken = method.MetadataToken;
                     }
                 }
 
@@ -387,7 +381,38 @@ public static partial class Bridge
                 {
                     return Intern(chosen);
                 }
+
+                // Constructors are exposed as ".ctor" like in mono.
+                if (name == ".ctor")
+                {
+                    chosen = null;
+                    chosenIsPublic = false;
+                    chosenToken = int.MaxValue;
+                    foreach (var ctor in t.GetConstructors(AllDeclared))
+                    {
+                        if (argc >= 0 && ctor.GetParameters().Length != argc)
+                        {
+                            continue;
+                        }
+
+                        if (IsBetterMethodCandidate(ctor, chosen, chosenIsPublic, chosenToken))
+                        {
+                            chosen = ctor;
+                            chosenIsPublic = ctor.IsPublic;
+                            chosenToken = ctor.MetadataToken;
+                        }
+                    }
+
+                    if (chosen != null)
+                    {
+                        return Intern(chosen);
+                    }
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            Log($"TypeGetMethod({name}) failed on {type}: {ex.Message}", "warning");
         }
 
         return IntPtr.Zero;
@@ -443,42 +468,49 @@ public static partial class Bridge
                 : argsPart.Split(',').Select(a => a.Trim()).ToArray();
         }
 
-        for (var t = type; t != null; t = t.BaseType)
+        try
         {
-            IEnumerable<MethodBase> members = t.GetMethods(AllDeclared).Where(m => m.Name == name);
-            if (name == ".ctor")
+            for (var t = type; t != null; t = t.BaseType)
             {
-                members = t.GetConstructors(AllDeclared);
-            }
-
-            foreach (var member in members)
-            {
-                if (argNames == null)
+                IEnumerable<MethodBase> members = t.GetMethods(AllDeclared).Where(m => m.Name == name);
+                if (name == ".ctor")
                 {
-                    return Intern(member);
+                    members = t.GetConstructors(AllDeclared);
                 }
 
-                var parameters = member.GetParameters();
-                if (parameters.Length != argNames.Length)
+                foreach (var member in members)
                 {
-                    continue;
-                }
-
-                bool match = true;
-                for (int i = 0; i < parameters.Length; i++)
-                {
-                    if (!TypeNameMatches(parameters[i].ParameterType, argNames[i]))
+                    if (argNames == null)
                     {
-                        match = false;
-                        break;
+                        return Intern(member);
+                    }
+
+                    var parameters = member.GetParameters();
+                    if (parameters.Length != argNames.Length)
+                    {
+                        continue;
+                    }
+
+                    bool match = true;
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        if (!TypeNameMatches(parameters[i].ParameterType, argNames[i]))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        return Intern(member);
                     }
                 }
-
-                if (match)
-                {
-                    return Intern(member);
-                }
             }
+        }
+        catch (Exception ex)
+        {
+            Log($"TypeGetMethodBySignature({signature}) failed on {type}: {ex.Message}", "warning");
         }
 
         return IntPtr.Zero;
@@ -528,19 +560,27 @@ public static partial class Bridge
             return 0;
         }
 
-        var flags = includeBase != 0 ? AllInstanceStatic : AllDeclared;
-        var methods = type.GetMethods(flags);
-
-        if (buffer != null)
+        try
         {
-            var count = Math.Min(capacity, methods.Length);
-            for (int i = 0; i < count; i++)
-            {
-                buffer[i] = Intern(methods[i]);
-            }
-        }
+            var flags = includeBase != 0 ? AllInstanceStatic : AllDeclared;
+            var methods = type.GetMethods(flags);
 
-        return methods.Length;
+            if (buffer != null)
+            {
+                var count = Math.Min(capacity, methods.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    buffer[i] = Intern(methods[i]);
+                }
+            }
+
+            return methods.Length;
+        }
+        catch (Exception ex)
+        {
+            Log($"TypeGetMethods failed on {type}: {ex.Message}", "warning");
+            return 0;
+        }
     }
 
     [UnmanagedCallersOnly]
@@ -695,7 +735,17 @@ public static partial class Bridge
         }
 
         var declaring = method.DeclaringType != null ? GetMonoStyleFullName(method.DeclaringType) : "?";
-        var parameters = string.Join(",", method.GetParameters().Select(p => GetMonoStyleFullName(p.ParameterType)));
+        string parameters;
+        try
+        {
+            parameters = string.Join(",", method.GetParameters().Select(p => GetMonoStyleFullName(p.ParameterType)));
+        }
+        catch (Exception)
+        {
+            // Unresolvable parameter types (partial deploys) must not
+            // fail-fast out of the export; degrade to an unknown arg list.
+            parameters = "?";
+        }
         return AllocUtf8($"{declaring}:{method.Name} ({parameters})");
     }
 
@@ -754,17 +804,27 @@ public static partial class Bridge
             return 0;
         }
 
-        var parameters = method.GetParameters();
-        if (buffer != null)
+        try
         {
-            var count = Math.Min(capacity, parameters.Length);
-            for (int i = 0; i < count; i++)
+            var parameters = method.GetParameters();
+            if (buffer != null)
             {
-                buffer[i] = Intern(parameters[i].ParameterType);
+                var count = Math.Min(capacity, parameters.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    buffer[i] = Intern(parameters[i].ParameterType);
+                }
             }
-        }
 
-        return parameters.Length;
+            return parameters.Length;
+        }
+        catch (Exception ex)
+        {
+            // Unresolvable parameter types (partial deploys) must not
+            // fail-fast out of the export.
+            Log($"MethodGetParamTypes failed for {method.Name}: {ex.Message}", "warning");
+            return 0;
+        }
     }
 
     [UnmanagedCallersOnly]
@@ -929,7 +989,7 @@ public static partial class Bridge
         if (accessor != null && accessor.IsStatic) flags |= 1 << 0;
         if (property.CanRead && !property.CanWrite) flags |= 1 << 1; // readonly
         if (accessor != null && accessor.IsSpecialName) flags |= 1 << 3;
-        if (property.GetCustomAttribute<System.ComponentModel.DefaultValueAttribute>() != null) flags |= 1 << 4;
+        if (HasDefaultValueAttribute(property)) flags |= 1 << 4;
 
         int vis = 0;
         if (accessor != null)
@@ -942,6 +1002,29 @@ public static partial class Bridge
         flags |= vis << 8;
 
         return flags;
+    }
+
+    /// Metadata-only presence check: instantiating the attribute (via
+    /// GetCustomAttribute) runs user attribute constructors and can throw out
+    /// of an UnmanagedCallersOnly export, which fail-fasts the process.
+    private static bool HasDefaultValueAttribute(PropertyInfo property)
+    {
+        try
+        {
+            foreach (var data in property.GetCustomAttributesData())
+            {
+                if (data.AttributeType.FullName == "System.ComponentModel.DefaultValueAttribute")
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // Unresolvable attribute types (partial deploys) count as absent.
+        }
+
+        return false;
     }
 
     /// Attribute instances on a property (new object handles).

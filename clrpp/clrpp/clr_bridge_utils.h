@@ -3,11 +3,21 @@
 #include "clr_config.h"
 
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
 namespace clr
 {
+
+/// Guards the type/method/property/field meta caches. Wrappers are
+/// constructed off the main thread too (e.g. weave_assembly on compile
+/// jobs), and an unguarded unordered_map mutation is a crash-grade race.
+inline auto meta_cache_mutex() -> std::mutex&
+{
+	static std::mutex m;
+	return m;
+}
 
 template<typename FillFn>
 auto fetch_handles(FillFn fill) -> std::vector<clr_handle>
@@ -38,13 +48,24 @@ template<typename Meta, typename Key, typename PopulateFn>
 auto get_or_create_meta(std::unordered_map<Key, std::shared_ptr<Meta>>& cache, Key key, PopulateFn populate)
 	-> std::shared_ptr<Meta>
 {
+	{
+		std::lock_guard<std::mutex> lock(meta_cache_mutex());
+		auto it = cache.find(key);
+		if(it != cache.end())
+		{
+			return it->second;
+		}
+	}
+	// Populate outside the lock: it round-trips through the bridge, and a
+	// racing duplicate populate is harmless (same content, loser discarded).
+	auto meta = std::make_shared<Meta>();
+	populate(*meta);
+	std::lock_guard<std::mutex> lock(meta_cache_mutex());
 	auto it = cache.find(key);
 	if(it != cache.end())
 	{
 		return it->second;
 	}
-	auto meta = std::make_shared<Meta>();
-	populate(*meta);
 	cache[key] = meta;
 	return meta;
 }

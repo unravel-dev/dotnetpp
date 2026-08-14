@@ -244,18 +244,26 @@ inline auto get_name(bool& found) -> const type_names_t&
 template <typename Tuple>
 inline auto get_args_signature() -> std::pair<std::string, bool>
 {
-	bool all_types_known = false;
+	// The signature is only usable when EVERY argument type is known
+	// (AND-accumulated per argument); a partial signature would bind the
+	// wrong overload or fail the lookup outright. for_each_tuple_type hands
+	// the lambda an index constant, so the element type must be extracted
+	// from the tuple - naming the constant's ::type yields the constant
+	// itself and would mark every argument unknown.
+	bool all_types_known = true;
 
 	size_t i = 0;
 	std::string result;
 	mono::for_each_tuple_type<Tuple>(
-		[&](auto tag)
+		[&](auto index)
 		{
-			using arg_t = typename std::decay_t<decltype(tag)>::type;
+			using arg_t = std::decay_t<std::tuple_element_t<decltype(index)::value, Tuple>>;
 
-			const auto& name = types::get_name<arg_t>(all_types_known).name;
+			bool this_type_known = false;
+			const auto& name = types::get_name<arg_t>(this_type_known).name;
+			all_types_known &= this_type_known;
 
-			if(all_types_known && !name.empty())
+			if(this_type_known && !name.empty())
 			{
 				if(i++ > 0)
 				{

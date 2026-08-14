@@ -345,6 +345,7 @@ auto clr_type::get_internal_ptr() const -> clr_handle
 
 void reset_type_cache()
 {
+	std::lock_guard<std::mutex> lock(meta_cache_mutex());
 	get_type_cache().clear();
 }
 

@@ -3,6 +3,7 @@
 #include "mono_exception.h"
 #include "mono_object.h"
 
+#include <mutex>
 #include <unordered_map>
 
 BEGIN_MONO_INCLUDE
@@ -28,8 +29,17 @@ auto get_field_cache() -> std::unordered_map<MonoClassField*, std::shared_ptr<mo
 	return field_cache;
 }
 
+// Guards this meta cache: wrappers are constructed off the main thread too
+// (e.g. compile jobs), and unordered_map mutation is a crash-grade race.
+auto get_meta_cache_mutex() -> std::mutex&
+{
+	static std::mutex m;
+	return m;
+}
+
 auto get_meta_info(MonoClassField* field) -> std::shared_ptr<mono_field::meta_info>
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_field_cache();
 	auto it = cache.find(field);
 	if(it != cache.end())
@@ -41,6 +51,7 @@ auto get_meta_info(MonoClassField* field) -> std::shared_ptr<mono_field::meta_in
 
 void set_meta_info(MonoClassField* field, std::shared_ptr<mono_field::meta_info> meta)
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_field_cache();
 	cache[field] = meta;
 }
@@ -270,6 +281,7 @@ auto mono_field::get_internal_ptr() const -> MonoClassField*
 
 void reset_field_cache()
 {
+	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());
 	auto& cache = get_field_cache();
 	cache.clear();
 }

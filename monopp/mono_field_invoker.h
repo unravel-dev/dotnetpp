@@ -52,6 +52,12 @@ void mono_field_invoker<T>::set_value_impl(const mono_object* object, const T& v
 	assert(field_);
 
 	auto mono_val = mono_converter<T>::to_managed(val);
+	// The runtime copies the managed value size out of the argument buffer;
+	// a larger field would over-read past the converted value.
+	if(is_valuetype() && get_type().get_sizeof() > sizeof(mono_val))
+	{
+		throw mono_exception("NATIVE::Field " + get_name() + " value is larger than native storage");
+	}
 	auto arg = to_managed_arg(mono_val, type_);
 
 	if(object)
@@ -144,30 +150,45 @@ auto mono_field_invoker<T>::get_value(const mono_object& object) const -> T
 template <typename T>
 auto mono_field_invoker<T>::get_value_impl(const mono_object* object) const -> T
 {
-	T val{};
 	assert(field_);
-	MonoObject* refvalue = nullptr;
-	void* arg = &val;
-	if(!is_valuetype())
+	using managed_type = typename mono_converter<T>::managed_type;
+
+	if(is_valuetype())
 	{
-		arg = &refvalue;
+		// Read into the managed representation, then convert: for converted
+		// POD types the managed struct differs from T, and the runtime copies
+		// the managed value size - reading straight into T would overflow the
+		// stack. Fields larger than the storage are rejected outright.
+		if(get_type().get_sizeof() > sizeof(managed_type))
+		{
+			throw mono_exception("NATIVE::Field " + get_name() + " value is larger than native storage");
+		}
+		managed_type storage{};
+		if(object)
+		{
+			auto obj = object->get_internal_ptr();
+			assert(obj);
+			mono_field_get_value(obj, field_, &storage);
+		}
+		else
+		{
+			mono_field_static_get_value(owning_type_vtable_, field_, &storage);
+		}
+		return mono_converter<T>::from_managed(storage);
 	}
+
+	MonoObject* refvalue = nullptr;
 	if(object)
 	{
 		auto obj = object->get_internal_ptr();
 		assert(obj);
-		mono_field_get_value(obj, field_, arg);
+		mono_field_get_value(obj, field_, &refvalue);
 	}
 	else
 	{
-		mono_field_static_get_value(owning_type_vtable_, field_, arg);
+		mono_field_static_get_value(owning_type_vtable_, field_, &refvalue);
 	}
-
-	if(!is_valuetype())
-	{
-		val = mono_converter<T>::from_managed(refvalue);
-	}
-	return val;
+	return mono_converter<T>::from_managed(refvalue);
 }
 
 template <>

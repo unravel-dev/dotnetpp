@@ -76,7 +76,7 @@ auto consume_pending_exception() -> const char*
 
 auto extract_relevant_stack_frame(const std::string& input) -> stack_frame_info
 {
-	std::regex cs_regex(R"(([^\s]+\.cs):(?:line )?(\d+))");
+	static const std::regex cs_regex(R"(([^\s]+\.cs):(?:line )?(\d+))");
 	std::smatch match;
 
 	std::istringstream iss(input);
