@@ -288,16 +288,12 @@ auto locate_dotnet_root(const std::string& override_root) -> std::string
 	// snaps keep the host under current/usr/lib/dotnet.
 	candidates.push_back("/snap/dotnet-sdk/current");
 	candidates.push_back("/snap/dotnet-sdk/current/usr/lib/dotnet");
-	candidates.push_back("/snap/dotnet-sdk-80/current");
-	candidates.push_back("/snap/dotnet-sdk-80/current/usr/lib/dotnet");
 	candidates.push_back("/snap/dotnet-sdk-90/current");
 	candidates.push_back("/snap/dotnet-sdk-90/current/usr/lib/dotnet");
 	candidates.push_back("/snap/dotnet-sdk-100/current");
 	candidates.push_back("/snap/dotnet-sdk-100/current/usr/lib/dotnet");
 	candidates.push_back("/var/lib/snapd/snap/dotnet-sdk/current");
 	candidates.push_back("/var/lib/snapd/snap/dotnet-sdk/current/usr/lib/dotnet");
-	candidates.push_back("/var/lib/snapd/snap/dotnet-sdk-80/current");
-	candidates.push_back("/var/lib/snapd/snap/dotnet-sdk-80/current/usr/lib/dotnet");
 	candidates.push_back("/var/lib/snapd/snap/dotnet-sdk-90/current");
 	candidates.push_back("/var/lib/snapd/snap/dotnet-sdk-90/current/usr/lib/dotnet");
 	candidates.push_back("/var/lib/snapd/snap/dotnet-sdk-100/current");
