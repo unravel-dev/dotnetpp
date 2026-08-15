@@ -354,9 +354,32 @@ auto get_common_library_names_for_deploy() -> const std::vector<std::string>&
 
 auto get_common_library_paths() -> const std::vector<std::string>&
 {
-	static const std::vector<std::string> paths{"C:/Program Files/dotnet", "/usr/share/dotnet",
-												"/usr/lib/dotnet", "/usr/local/share/dotnet",
-												"/opt/dotnet"};
+	// Snap SDK layout differs by package generation: the classic
+	// `dotnet-sdk` snap uses `current/` as DOTNET_ROOT, while versioned
+	// snaps (`dotnet-sdk-80` / `-90` / `-100`) keep the host under
+	// `current/usr/lib/dotnet`. `/snap` is usually a symlink to
+	// `/var/lib/snapd/snap`; both mounts are listed for distros that
+	// only expose one of them.
+	static const std::vector<std::string> paths{
+		"C:/Program Files/dotnet",
+		"/usr/share/dotnet",
+		"/usr/lib/dotnet",
+		"/usr/local/share/dotnet",
+		"/opt/dotnet",
+		"/snap/bin",
+		"/snap/dotnet-sdk/current",
+		"/snap/dotnet-sdk/current/usr/lib/dotnet",
+		"/snap/dotnet-sdk-90/current",
+		"/snap/dotnet-sdk-90/current/usr/lib/dotnet",
+		"/snap/dotnet-sdk-100/current",
+		"/snap/dotnet-sdk-100/current/usr/lib/dotnet",
+		"/var/lib/snapd/snap/dotnet-sdk/current",
+		"/var/lib/snapd/snap/dotnet-sdk/current/usr/lib/dotnet",
+		"/var/lib/snapd/snap/dotnet-sdk-90/current",
+		"/var/lib/snapd/snap/dotnet-sdk-90/current/usr/lib/dotnet",
+		"/var/lib/snapd/snap/dotnet-sdk-100/current",
+		"/var/lib/snapd/snap/dotnet-sdk-100/current/usr/lib/dotnet",
+	};
 	return paths;
 }
 
