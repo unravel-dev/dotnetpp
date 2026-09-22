@@ -282,6 +282,21 @@ void test_suite()
 		EXPECT_NOTHROWS(expression());
 	};
 
+	TEST_CASE("dotnetpp : type lookup takes full names only")
+	{
+		auto expression = [&]()
+		{
+			// A name without a namespace names a global type, it is not a search by simple name:
+			// a domain asks corlib last, where "Vector3" would find System.Numerics.Vector3
+			// instead of a global Vector3.
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			EXPECT(!assembly.get_type("MonoppTest").valid());
+			EXPECT(!domain.get_type("String").valid());
+			EXPECT(domain.get_type("System.String").valid());
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
 	TEST_CASE("dotnetpp : type reflection")
 	{
 		auto expression = [&]()

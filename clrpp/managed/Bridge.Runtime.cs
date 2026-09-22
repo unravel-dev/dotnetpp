@@ -324,10 +324,14 @@ public static partial class Bridge
         }
     }
 
-    internal static Type FindType(Assembly assembly, string fullOrSimpleName)
+    /// Resolves a full name only, as mono does. A name without a namespace is
+    /// the full name of a global type, never a search by simple name: domains
+    /// ask their assemblies one by one and corlib last, so "Vector3" would find
+    /// System.Numerics.Vector3 before the global Vector3 of a later assembly.
+    internal static Type FindType(Assembly assembly, string fullName)
     {
         // Try the name verbatim first.
-        var type = assembly.GetType(fullOrSimpleName, throwOnError: false);
+        var type = assembly.GetType(fullName, throwOnError: false);
         if (type != null)
         {
             return type;
@@ -335,7 +339,7 @@ public static partial class Bridge
 
         // Handle nested type names expressed with '.' (mono style):
         // Tests.Nested.TestClassNested1.TestClassNested2 -> Tests.Nested.TestClassNested1+TestClassNested2
-        var dotted = fullOrSimpleName;
+        var dotted = fullName;
         var lastDot = dotted.LastIndexOf('.');
         while (lastDot > 0)
         {
@@ -346,15 +350,6 @@ public static partial class Bridge
                 return type;
             }
             lastDot = dotted.LastIndexOf('.', lastDot - 1);
-        }
-
-        // Fall back to a simple name search across all exported/defined types.
-        foreach (var candidate in SafeGetTypes(assembly))
-        {
-            if (candidate.Name == fullOrSimpleName)
-            {
-                return candidate;
-            }
         }
 
         return null;
