@@ -9,6 +9,7 @@
 
 #include "dotnet_array.h"
 #include "dotnet_assembly.h"
+#include "dotnet_dictionary.h"
 #include "dotnet_domain.h"
 #include "dotnet_exception.h"
 #include "dotnet_field.h"

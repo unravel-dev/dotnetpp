@@ -91,9 +91,15 @@ public:
 	auto is_serializable() const -> bool;
 	auto is_string() const -> bool;
 	auto is_list() const -> bool;
+	/// True for System.Collections.Generic.Dictionary<TKey, TValue>.
+	auto is_dictionary() const -> bool;
 
 	/// Type of List<this>.
 	auto get_list_type() const -> clr_type;
+
+	/// Type arguments of a closed generic type, in declaration order
+	/// (TKey, TValue for a dictionary). Empty for a non-generic type.
+	auto get_generic_arguments() const -> std::vector<clr_type>;
 
 	/// True if both wrappers refer to the same System.Type instance.
 	auto equals(const clr_type& other) const -> bool;

@@ -99,6 +99,12 @@ public:
 	auto is_serializable() const -> bool;
 	auto is_string() const -> bool;
 	auto is_list() const -> bool;
+	/// True for System.Collections.Generic.Dictionary<TKey, TValue>.
+	auto is_dictionary() const -> bool;
+
+	/// Type arguments of a closed generic type, in declaration order
+	/// (TKey, TValue for a dictionary). Empty for a non-generic type.
+	auto get_generic_arguments() const -> std::vector<mono_type>;
 
 	/// True if both wrappers refer to the same MonoClass.
 	auto equals(const mono_type& other) const -> bool;

@@ -88,6 +88,7 @@ public static partial class Bridge
         if (type == typeof(string)) flags |= 1 << 7;
         if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>)) flags |= 1 << 8;
         if (type.IsArray) flags |= 1 << 9;
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>)) flags |= 1 << 10;
         return flags;
     }
 
@@ -329,6 +330,30 @@ public static partial class Bridge
             Log($"TypeGetListType failed for {elementType}: {ex.Message}", "error");
             return IntPtr.Zero;
         }
+    }
+
+    /// Type arguments of a closed generic type, e.g. TKey and TValue of a
+    /// Dictionary&lt;TKey, TValue&gt;. None for a non-generic type.
+    [UnmanagedCallersOnly]
+    public static unsafe int TypeGetGenericArguments(IntPtr typeHandle, IntPtr* buffer, int capacity)
+    {
+        var type = Target<Type>(typeHandle);
+        if (type == null || !type.IsGenericType)
+        {
+            return 0;
+        }
+
+        var arguments = type.GetGenericArguments();
+        if (buffer != null)
+        {
+            var count = Math.Min(capacity, arguments.Length);
+            for (int i = 0; i < count; i++)
+            {
+                buffer[i] = Intern(arguments[i]);
+            }
+        }
+
+        return arguments.Length;
     }
 
     // ---------------------------------------------------------------------

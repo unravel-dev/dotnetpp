@@ -6,6 +6,7 @@
 
 #include "clr_array.h"
 #include "clr_assembly.h"
+#include "clr_dictionary.h"
 #include "clr_domain.h"
 #include "clr_exception.h"
 #include "clr_field.h"

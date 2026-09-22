@@ -171,6 +171,8 @@ struct exports
 	/// array_pin_release or free_handle. 1 = success, 0 = unavailable.
 	int32_t(CLRPP_CALLTYPE* array_pin_acquire)(clr_handle, clr_array_pin_info*);
 	void(CLRPP_CALLTYPE* array_pin_release)(clr_handle);
+	/// Type arguments of a closed generic type; returns their count.
+	int32_t(CLRPP_CALLTYPE* type_get_generic_arguments)(clr_handle, clr_handle*, int32_t);
 };
 
 // Runtime lifecycle, used by clr::init / clr::shutdown. managed_dir is the

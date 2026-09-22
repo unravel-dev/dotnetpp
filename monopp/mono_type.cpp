@@ -1009,6 +1009,51 @@ auto mono_type::is_list() const -> bool
 	auto fullname = get_fullname();
 	return fullname.find("System.Collections.Generic.List<") == 0;
 }
+
+auto mono_type::is_dictionary() const -> bool
+{
+	auto fullname = get_fullname();
+	return fullname.find("System.Collections.Generic.Dictionary<") == 0;
+}
+
+auto mono_type::get_generic_arguments() const -> std::vector<mono_type>
+{
+	std::vector<mono_type> arguments;
+	if(!class_ || mono_type_get_type(mono_class_get_type(class_)) != MONO_TYPE_GENERICINST)
+	{
+		return arguments;
+	}
+
+	// The embedding API has no call for the arguments of a generic instance, so
+	// ask System.Type.GetGenericArguments through reflection.
+	auto* type_object =
+		reinterpret_cast<MonoObject*>(mono_type_get_object(mono_domain_get(), mono_class_get_type(class_)));
+	MonoMethod* method = nullptr;
+	for(MonoClass* cls = mono_object_get_class(type_object); cls && !method; cls = mono_class_get_parent(cls))
+	{
+		method = mono_class_get_method_from_name(cls, "GetGenericArguments", 0);
+	}
+	if(!method)
+	{
+		return arguments;
+	}
+
+	MonoObject* exc = nullptr;
+	auto* result = reinterpret_cast<MonoArray*>(
+		mono_runtime_invoke(mono_object_get_virtual_method(type_object, method), type_object, nullptr, &exc));
+	if(exc || !result)
+	{
+		return arguments;
+	}
+
+	const auto count = mono_array_length(result);
+	arguments.reserve(count);
+	for(uintptr_t i = 0; i < count; ++i)
+	{
+		arguments.emplace_back(mono_reflection_type_get_type(mono_array_get(result, MonoReflectionType*, i)));
+	}
+	return arguments;
+}
 void reset_type_cache()
 {
 	std::lock_guard<std::mutex> lock(get_meta_cache_mutex());

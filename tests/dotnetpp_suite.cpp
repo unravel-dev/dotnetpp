@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iostream>
 #include <list>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -1238,6 +1239,109 @@ void test_suite()
 			dotnet::list<int> native_list(values, dotnet::type{});
 			EXPECT(native_list.valid());
 			EXPECT(sum_list(native_list) == 18);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : dictionaries")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto corlib = dotnet::assembly::get_corlib();
+			auto string_type = corlib.get_type("System", "String");
+			auto int_type = corlib.get_type("System", "Int32");
+			auto text = [&](const std::string& value) -> dotnet::object { return dotnet::string(domain, value); };
+			auto number = [&](int32_t value) { return dotnet::box_value(value, int_type); };
+			auto read_entries = [](const dotnet::dictionary& dictionary)
+			{
+				std::map<std::string, int32_t> entries;
+				for(const auto& entry : dictionary.to_vector())
+				{
+					entries[dotnet::string(entry.first).as_utf8()] = dotnet::unbox_value<int32_t>(entry.second);
+				}
+				return entries;
+			};
+
+			auto make_dictionary = dotnet::make_method_invoker<dotnet::object()>(type, "MakeDictionary");
+			auto sum_dictionary = dotnet::make_method_invoker<int(dotnet::object)>(type, "SumDictionary");
+			dotnet::dictionary dictionary(make_dictionary());
+			EXPECT(dictionary.valid());
+			EXPECT(dictionary.get_type().is_dictionary());
+			EXPECT(!dictionary.get_type().is_list());
+			EXPECT(dictionary.get_type().get_generic_arguments().size() == 2u);
+			EXPECT(dictionary.get_key_type() == string_type);
+			EXPECT(dictionary.get_value_type() == int_type);
+			EXPECT(dictionary.size() == 3u);
+			EXPECT(dictionary.contains_key(text("two")));
+			EXPECT(!dictionary.contains_key(text("missing")));
+			EXPECT(dotnet::unbox_value<int32_t>(dictionary.get(text("two"))) == 2);
+
+			dictionary.set(text("four"), number(4));
+			dictionary.set(text("one"), number(10));
+			EXPECT(dictionary.size() == 4u);
+			EXPECT(sum_dictionary(dictionary) == 10 + 2 + 3 + 4);
+
+			EXPECT(dictionary.remove(text("two")));
+			EXPECT(!dictionary.remove(text("missing")));
+			const std::map<std::string, int32_t> expected_entries = {{"one", 10}, {"three", 3}, {"four", 4}};
+			EXPECT(read_entries(dictionary) == expected_entries);
+
+			// Assign: a later key wins, a missing value is created, an entry without a key is skipped.
+			dictionary.assign({{text("a"), number(1)},
+							   {text("b"), dotnet::object{}},
+							   {dotnet::object{}, number(5)},
+							   {text("a"), number(7)}},
+							  true);
+			const std::map<std::string, int32_t> expected_assigned = {{"a", 7}, {"b", 0}};
+			EXPECT(read_entries(dictionary) == expected_assigned);
+
+			auto created = dotnet::dictionary::create(dictionary.get_type());
+			EXPECT(created.valid());
+			EXPECT(created.size() == 0u);
+			EXPECT(created.to_vector().empty());
+			created.set(text("x"), number(6));
+			EXPECT(sum_dictionary(created) == 6);
+
+			auto list_obj = dotnet::make_method_invoker<dotnet::list<int>()>(type, "MakeList")();
+			EXPECT(!list_obj.get_type().is_dictionary());
+			EXPECT(!int_type.is_dictionary());
+			EXPECT(int_type.get_generic_arguments().empty());
+
+			// Enum keys, and a null value that still tells its type.
+			auto make_enum_dictionary = dotnet::make_method_invoker<dotnet::object()>(type, "MakeEnumDictionary");
+			dotnet::dictionary enum_dictionary(make_enum_dictionary());
+			EXPECT(enum_dictionary.get_key_type().is_enum());
+			EXPECT(enum_dictionary.get_value_type() == string_type);
+			std::map<int32_t, std::string> enum_entries;
+			for(const auto& entry : enum_dictionary.to_vector())
+			{
+				EXPECT(entry.second.get_type() == string_type);
+				enum_entries[dotnet::unbox_value<int32_t>(entry.first)] =
+					entry.second.valid() ? dotnet::string(entry.second).as_utf8() : "null";
+			}
+			const std::map<int32_t, std::string> expected_enum_entries = {{5, "second"}, {42, "null"}};
+			EXPECT(enum_entries == expected_enum_entries);
+
+			// An enum key boxed on the native side finds the same entry.
+			auto enum_key = [&](int32_t value) { return dotnet::box_value(value, enum_dictionary.get_key_type()); };
+			EXPECT(enum_dictionary.contains_key(enum_key(5)));
+			enum_dictionary.set(enum_key(1), text("first"));
+			EXPECT(enum_dictionary.size() == 3u);
+			EXPECT(dotnet::string(enum_dictionary.get(enum_key(1))).as_utf8() == "first");
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : new string instance is empty")
+	{
+		auto expression = [&]()
+		{
+			auto string_type = dotnet::assembly::get_corlib().get_type("System", "String");
+			auto instance = string_type.new_instance();
+			EXPECT(instance.valid());
+			EXPECT(dotnet::string(instance).as_utf8().empty());
 		};
 		EXPECT_NOTHROWS(expression());
 	};

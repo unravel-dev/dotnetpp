@@ -346,6 +346,26 @@ class MonoppTest
 		return result;
 	}
 
+	public static Dictionary<string, int> MakeDictionary()
+	{
+		return new Dictionary<string, int> { { "one", 1 }, { "two", 2 }, { "three", 3 } };
+	}
+
+	public static int SumDictionary(Dictionary<string, int> values)
+	{
+		int sum = 0;
+		foreach (var pair in values)
+		{
+			sum += pair.Value;
+		}
+		return sum;
+	}
+
+	public static Dictionary<TestEnum, string> MakeEnumDictionary()
+	{
+		return new Dictionary<TestEnum, string> { { TestEnum.Second, "second" }, { TestEnum.Third, null } };
+	}
+
 	// Native exceptions propagating into managed code.
 	[MethodImpl(MethodImplOptions.InternalCall)]
 	public static extern void ThrowNative();

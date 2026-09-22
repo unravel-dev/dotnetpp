@@ -22,7 +22,8 @@ public static partial class Bridge
                 throw new ArgumentException("Invalid type handle");
             }
 
-            var obj = Activator.CreateInstance(type, nonPublic: true);
+            // A string has no parameterless constructor; its default instance is the empty string.
+            var obj = type == typeof(string) ? string.Empty : Activator.CreateInstance(type, nonPublic: true);
             return NewObjectHandle(obj);
         }
         catch (Exception ex)

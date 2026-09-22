@@ -29,6 +29,7 @@ enum type_flag_bits : int32_t
 	flag_string = 1 << 7,
 	flag_list = 1 << 8,
 	flag_array = 1 << 9,
+	flag_dictionary = 1 << 10,
 };
 
 auto get_type_cache() -> std::unordered_map<clr_handle, std::shared_ptr<clr_type::meta_info>>&
@@ -323,6 +324,11 @@ auto clr_type::is_list() const -> bool
 	return meta_ && (meta_->flags & flag_list) != 0;
 }
 
+auto clr_type::is_dictionary() const -> bool
+{
+	return meta_ && (meta_->flags & flag_dictionary) != 0;
+}
+
 auto clr_type::get_list_type() const -> clr_type
 {
 	if(!valid())
@@ -331,6 +337,19 @@ auto clr_type::get_list_type() const -> clr_type
 	}
 	auto handle = bridge().type_get_list_type(type_);
 	return handle ? clr_type(handle) : clr_type();
+}
+
+auto clr_type::get_generic_arguments() const -> std::vector<clr_type>
+{
+	if(!valid())
+	{
+		return {};
+	}
+
+	return fetch_and_map<clr_type>(
+		[this](clr_handle* buffer, int32_t count)
+		{ return bridge().type_get_generic_arguments(type_, buffer, count); },
+		[](clr_handle handle) { return clr_type(handle); });
 }
 
 auto clr_type::equals(const clr_type& other) const -> bool
