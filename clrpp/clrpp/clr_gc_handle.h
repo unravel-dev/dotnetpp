@@ -37,6 +37,10 @@ public:
 	{
 		unlock();
 		handle_ = obj.get_managed_ptr();
+		// An object's runtime type never changes: resolve it once here (a
+		// wrapper may carry a declared type instead) so get_object() does not
+		// query the bridge on every call.
+		type_ = handle_ ? clr_object(handle_).get_type() : clr_type{};
 		// Stamp the domain identity at lock time so consumers can detect
 		// stale pins after a domain unload/reload.
 		domain_version_ = 0;
@@ -53,6 +57,7 @@ public:
 	void unlock()
 	{
 		handle_ = {};
+		type_ = {};
 		domain_version_ = 0;
 	}
 
@@ -77,7 +82,11 @@ public:
 		{
 			return {};
 		}
-		return clr_object(handle_);
+		if(!type_.valid())
+		{
+			return clr_object(handle_);
+		}
+		return clr_object(handle_, type_);
 	}
 
 	/// Get the object as a specific type.
@@ -89,6 +98,7 @@ public:
 
 private:
 	managed_ptr handle_;
+	clr_type type_;
 	intptr_t domain_version_{};
 };
 

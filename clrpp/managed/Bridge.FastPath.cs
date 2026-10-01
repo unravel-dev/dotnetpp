@@ -222,6 +222,7 @@ public static partial class Bridge
     private sealed class MethodInvokePlan
     {
         public MethodBase Method;
+        public bool IsStatic;
         public ParameterInfo[] Parameters;
         public MethodInvoker MethodInvoker;
         public ConstructorInvoker ConstructorInvoker;
@@ -258,6 +259,7 @@ public static partial class Bridge
         var plan = new MethodInvokePlan
         {
             Method = method,
+            IsStatic = method.IsStatic,
             Parameters = method.GetParameters(),
         };
 

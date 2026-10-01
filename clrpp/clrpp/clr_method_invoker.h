@@ -120,17 +120,81 @@ struct invoke_result<T, managed_ptr>
 	}
 };
 
+template <>
+struct invoke_result<std::string, managed_ptr>
+{
+	// Strings come back as one utf8 allocation (freed by take_string)
+	// instead of an object handle plus a separate utf8 fetch.
+	using storage_type = int32_t;
+
+	static auto prepare(storage_type&) -> clr_variant
+	{
+		clr_variant v;
+		v.kind = clr_variant::kind_string_utf8;
+		return v;
+	}
+
+	static auto extract(storage_type&, const clr_variant& v) -> std::string
+	{
+		if(v.kind != clr_variant::kind_string_utf8 || !v.data)
+		{
+			return {};
+		}
+		return take_string(static_cast<const char*>(v.data));
+	}
+};
+
+// Per-argument storage for an invoke. By default the converter's managed
+// representation; strings are borrowed as utf8 for the duration of the call.
+template <typename T>
+struct invoke_arg
+{
+	using storage_type = typename clr_converter<T>::managed_type;
+
+	template <typename U>
+	static auto store(U&& value) -> storage_type
+	{
+		return clr_converter<T>::to_managed(std::forward<U>(value));
+	}
+
+	static auto to_variant(storage_type& stored) -> clr_variant
+	{
+		return to_clr_variant(stored);
+	}
+};
+
+template <>
+struct invoke_arg<std::string>
+{
+	using storage_type = std::string;
+
+	template <typename U>
+	static auto store(U&& value) -> storage_type
+	{
+		return std::forward<U>(value);
+	}
+
+	static auto to_variant(storage_type& stored) -> clr_variant
+	{
+		clr_variant v;
+		v.kind = clr_variant::kind_string_utf8;
+		v.size = static_cast<int32_t>(stored.size());
+		v.data = const_cast<char*>(stored.c_str());
+		return v;
+	}
+};
+
 template <typename... Args>
 struct variant_pack
 {
 	// Keeps the converted managed representations alive while their
 	// addresses/handles are referenced by the variants.
-	std::tuple<typename clr_converter<std::decay_t<Args>>::managed_type...> storage;
+	std::tuple<typename invoke_arg<std::decay_t<Args>>::storage_type...> storage;
 	std::array<clr_variant, sizeof...(Args) == 0 ? 1 : sizeof...(Args)> variants;
 	int32_t count = static_cast<int32_t>(sizeof...(Args));
 
 	explicit variant_pack(Args... args)
-		: storage(clr_converter<std::decay_t<Args>>::to_managed(std::forward<Args>(args))...)
+		: storage(invoke_arg<std::decay_t<Args>>::store(std::forward<Args>(args))...)
 	{
 		fill(std::make_index_sequence<sizeof...(Args)>{});
 	}
@@ -139,7 +203,7 @@ struct variant_pack
 	void fill(std::index_sequence<I...>)
 	{
 		using discard = int[];
-		(void)discard{0, (void(variants[I] = to_clr_variant(std::get<I>(storage))), 0)...};
+		(void)discard{0, (void(variants[I] = invoke_arg<std::decay_t<Args>>::to_variant(std::get<I>(storage))), 0)...};
 	}
 };
 

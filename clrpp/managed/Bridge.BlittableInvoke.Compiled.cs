@@ -73,9 +73,15 @@ public static partial class Bridge
             {
                 il.Emit(OpCodes.Unbox, declaring);
             }
-            // Reference-type this: leave as object. Do not Castclass to
-            // DeclaringType — that fails across collectible ALC boundaries
-            // where MethodInvoker still succeeds.
+            else
+            {
+                // Type-check `this` with a managed cast (the same helper the
+                // compiled field accessors use) instead of an IL Castclass
+                // with a foreign type token.
+                il.Emit(OpCodes.Call, typeof(Bridge)
+                    .GetMethod(nameof(CompiledCastFieldTarget), BindingFlags.NonPublic | BindingFlags.Static)
+                    .MakeGenericMethod(declaring));
+            }
         }
 
         for (int i = 0; i < parameters.Length; i++)

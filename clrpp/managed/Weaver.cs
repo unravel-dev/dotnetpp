@@ -228,6 +228,7 @@ internal static class IcallWeaver
         Char,       // widened to int32 (default interop would be 1-byte ANSI)
         String,     // utf8 allocation, freed after the call
         Object,     // GCHandle, freed after the call
+        Type,       // interned GCHandle (session lifetime), nothing to free
         ByRefValue, // pinned pointer to the value
     }
 
@@ -526,7 +527,12 @@ internal static class IcallWeaver
         }
         foreach (var parameter in method.Parameters)
         {
-            kinds.Add(ClassifyArg(parameter.ParameterType));
+            var kind = ClassifyArg(parameter.ParameterType);
+            if (kind == ArgKind.Object && parameter.ParameterType.FullName == "System.Type")
+            {
+                kind = ArgKind.Type;
+            }
+            kinds.Add(kind);
             sources.Add(parameter);
         }
 
@@ -569,6 +575,14 @@ internal static class IcallWeaver
                     il.Emit(OpCodes.Stloc, marshalled[i]);
                     break;
 
+                case ArgKind.Type:
+                    marshalled[i] = new VariableDefinition(ts.IntPtr);
+                    method.Body.Variables.Add(marshalled[i]);
+                    LoadSource(i);
+                    il.Emit(OpCodes.Call, refs.TypeHandle);
+                    il.Emit(OpCodes.Stloc, marshalled[i]);
+                    break;
+
                 case ArgKind.ByRefValue:
                     // Pin for the duration of the call: the referenced value
                     // may live on the GC heap (field / array element) and
@@ -595,6 +609,7 @@ internal static class IcallWeaver
             {
                 case ArgKind.String:
                 case ArgKind.Object:
+                case ArgKind.Type:
                     il.Emit(OpCodes.Ldloc, marshalled[i]);
                     callSite.Parameters.Add(new ParameterDefinition(ts.IntPtr));
                     break;
@@ -839,6 +854,7 @@ internal static class IcallWeaver
         public readonly MethodReference ConsumeUtf8;
         public readonly MethodReference ConsumeHandle;
         public readonly MethodReference ThrowIfPending;
+        public readonly MethodReference TypeHandle;
 
         /// Synthetic type holding the cached function pointer fields and
         /// BindAll(). Added to the module by EmitBinder once anything wove.
@@ -883,6 +899,7 @@ internal static class IcallWeaver
             ConsumeUtf8 = Helper("ConsumeUtf8", ts.String, ts.IntPtr);
             ConsumeHandle = Helper("ConsumeHandle", ts.Object, ts.IntPtr);
             ThrowIfPending = Helper("ThrowIfPending", ts.Void);
+            TypeHandle = Helper("TypeHandle", ts.IntPtr, new TypeReference("System", "Type", module, ts.CoreLibrary));
         }
 
         private static AssemblyNameReference FindOrAddBridgeReference(ModuleDefinition module)

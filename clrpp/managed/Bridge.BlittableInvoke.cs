@@ -95,9 +95,11 @@ public static partial class Bridge
     {
         call = null;
 
-        // No instance CreateDelegate path — DeclaringType casts break across
-        // collectible ALCs. Instance shapes use Compiled or MethodInvoker.
-        if (!method.IsStatic || !method.IsPublic)
+        // Instance methods bind as open-instance delegates over the concrete
+        // declaring class; the (TTarget) cast in the thunk type-checks the
+        // target. Value-type instance methods stay on MethodInvoker.
+        if (!method.IsStatic && (method.DeclaringType == null || method.DeclaringType.IsValueType ||
+                                 method.DeclaringType.ContainsGenericParameters))
         {
             return false;
         }
@@ -124,9 +126,35 @@ public static partial class Bridge
                                                                   bool isVoid)
     {
         var argc = parameters.Length;
+        if (!method.IsStatic)
+        {
+            return BindInstance(method, parameters, argc, isVoid);
+        }
+
         return isVoid
             ? BindStaticVoid(method, parameters, argc)
             : BindStaticRet(method, parameters, argc);
+    }
+
+    private static BlittableCall BindInstance(MethodInfo method, ParameterInfo[] parameters, int argc, bool isVoid)
+    {
+        var name = (isVoid ? "InstanceAction" : "InstanceFunc") + argc;
+        var typeArgs = new Type[argc + (isVoid ? 1 : 2)];
+        typeArgs[0] = method.DeclaringType;
+        for (int i = 0; i < argc; i++)
+        {
+            typeArgs[i + 1] = parameters[i].ParameterType;
+        }
+
+        if (!isVoid)
+        {
+            typeArgs[argc + 1] = method.ReturnType;
+        }
+
+        return (BlittableCall)typeof(BlittableBind)
+            .GetMethod(name)
+            .MakeGenericMethod(typeArgs)
+            .Invoke(null, new object[] { method });
     }
 
     private static Type[] GenericArgs(ParameterInfo[] parameters, int argc, Type ret = null)
@@ -281,6 +309,132 @@ public static partial class Bridge
 
             Unsafe.WriteUnaligned((void*)result->Data, value);
             result->Size = size;
+        }
+
+        public static BlittableCall InstanceAction0<TTarget>(MethodInfo method)
+            where TTarget : class
+        {
+            var d = (Action<TTarget>)method.CreateDelegate(typeof(Action<TTarget>));
+            return (target, args, result) => d((TTarget)target);
+        }
+
+        public static BlittableCall InstanceAction1<TTarget, T1>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged
+        {
+            var d = (Action<TTarget, T1>)method.CreateDelegate(typeof(Action<TTarget, T1>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0));
+        }
+
+        public static BlittableCall InstanceAction2<TTarget, T1, T2>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged
+        {
+            var d = (Action<TTarget, T1, T2>)method.CreateDelegate(typeof(Action<TTarget, T1, T2>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1));
+        }
+
+        public static BlittableCall InstanceAction3<TTarget, T1, T2, T3>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged
+        {
+            var d = (Action<TTarget, T1, T2, T3>)method.CreateDelegate(typeof(Action<TTarget, T1, T2, T3>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2));
+        }
+
+        public static BlittableCall InstanceAction4<TTarget, T1, T2, T3, T4>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged
+        {
+            var d = (Action<TTarget, T1, T2, T3, T4>)method.CreateDelegate(typeof(Action<TTarget, T1, T2, T3, T4>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3));
+        }
+
+        public static BlittableCall InstanceAction5<TTarget, T1, T2, T3, T4, T5>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged
+        {
+            var d = (Action<TTarget, T1, T2, T3, T4, T5>)method.CreateDelegate(typeof(Action<TTarget, T1, T2, T3, T4, T5>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4));
+        }
+
+        public static BlittableCall InstanceAction6<TTarget, T1, T2, T3, T4, T5, T6>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged where T6 : unmanaged
+        {
+            var d = (Action<TTarget, T1, T2, T3, T4, T5, T6>)method.CreateDelegate(typeof(Action<TTarget, T1, T2, T3, T4, T5, T6>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4), Read<T6>(args, 5));
+        }
+
+        public static BlittableCall InstanceAction7<TTarget, T1, T2, T3, T4, T5, T6, T7>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged where T6 : unmanaged where T7 : unmanaged
+        {
+            var d = (Action<TTarget, T1, T2, T3, T4, T5, T6, T7>)method.CreateDelegate(typeof(Action<TTarget, T1, T2, T3, T4, T5, T6, T7>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4), Read<T6>(args, 5), Read<T7>(args, 6));
+        }
+
+        public static BlittableCall InstanceAction8<TTarget, T1, T2, T3, T4, T5, T6, T7, T8>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged where T6 : unmanaged where T7 : unmanaged where T8 : unmanaged
+        {
+            var d = (Action<TTarget, T1, T2, T3, T4, T5, T6, T7, T8>)method.CreateDelegate(typeof(Action<TTarget, T1, T2, T3, T4, T5, T6, T7, T8>));
+            return (target, args, result) => d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4), Read<T6>(args, 5), Read<T7>(args, 6), Read<T8>(args, 7));
+        }
+
+        public static BlittableCall InstanceFunc0<TTarget, TRet>(MethodInfo method)
+            where TTarget : class where TRet : unmanaged
+        {
+            var d = (Func<TTarget, TRet>)method.CreateDelegate(typeof(Func<TTarget, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target));
+        }
+
+        public static BlittableCall InstanceFunc1<TTarget, T1, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0)));
+        }
+
+        public static BlittableCall InstanceFunc2<TTarget, T1, T2, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, T2, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, T2, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1)));
+        }
+
+        public static BlittableCall InstanceFunc3<TTarget, T1, T2, T3, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, T2, T3, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, T2, T3, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2)));
+        }
+
+        public static BlittableCall InstanceFunc4<TTarget, T1, T2, T3, T4, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, T2, T3, T4, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, T2, T3, T4, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3)));
+        }
+
+        public static BlittableCall InstanceFunc5<TTarget, T1, T2, T3, T4, T5, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, T2, T3, T4, T5, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, T2, T3, T4, T5, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4)));
+        }
+
+        public static BlittableCall InstanceFunc6<TTarget, T1, T2, T3, T4, T5, T6, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged where T6 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, T2, T3, T4, T5, T6, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, T2, T3, T4, T5, T6, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4), Read<T6>(args, 5)));
+        }
+
+        public static BlittableCall InstanceFunc7<TTarget, T1, T2, T3, T4, T5, T6, T7, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged where T6 : unmanaged where T7 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, T2, T3, T4, T5, T6, T7, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, T2, T3, T4, T5, T6, T7, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4), Read<T6>(args, 5), Read<T7>(args, 6)));
+        }
+
+        public static BlittableCall InstanceFunc8<TTarget, T1, T2, T3, T4, T5, T6, T7, T8, TRet>(MethodInfo method)
+            where TTarget : class where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged where T5 : unmanaged where T6 : unmanaged where T7 : unmanaged where T8 : unmanaged where TRet : unmanaged
+        {
+            var d = (Func<TTarget, T1, T2, T3, T4, T5, T6, T7, T8, TRet>)method.CreateDelegate(typeof(Func<TTarget, T1, T2, T3, T4, T5, T6, T7, T8, TRet>));
+            return (target, args, result) => Write(result, d((TTarget)target, Read<T1>(args, 0), Read<T2>(args, 1), Read<T3>(args, 2), Read<T4>(args, 3), Read<T5>(args, 4), Read<T6>(args, 5), Read<T7>(args, 6), Read<T8>(args, 7)));
         }
 
         public static BlittableCall StaticAction0(MethodInfo method)

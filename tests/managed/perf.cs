@@ -360,6 +360,44 @@ public class PerfTest
 	[MethodImpl(MethodImplOptions.InternalCall)]
 	public static extern Color NativeBrighten(Color c);
 
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern bool NativeHasType(uint id, Type t);
+
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern int NativeTouchObject(object o);
+
+	public static int IcallTypeLoop(int n)
+	{
+		int acc = 0;
+		var t = typeof(PerfTest);
+		for(int i = 0; i < n; ++i)
+		{
+			if(NativeHasType((uint)i, t))
+			{
+				acc++;
+			}
+		}
+		return acc;
+	}
+
+	public static int IcallObjectLoop(int n)
+	{
+		int acc = 0;
+		object o = new PerfTest();
+		for(int i = 0; i < n; ++i)
+		{
+			acc += NativeTouchObject(o);
+		}
+		return acc;
+	}
+
+	private int hookCount;
+
+	private void OnHook()
+	{
+		hookCount++;
+	}
+
 	public static long IcallAddLoop(int n)
 	{
 		long acc = 0;

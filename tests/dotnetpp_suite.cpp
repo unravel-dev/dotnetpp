@@ -144,6 +144,11 @@ auto MonoppTest_NativeAdd(int a, int b) -> int
 	return a + b;
 }
 
+auto MonoppTest_NativeTypeName(const dotnet::type& type) -> std::string
+{
+	return type.valid() ? type.get_fullname() : std::string{};
+}
+
 // Bool-bearing struct by value in both directions.
 auto PackTest_NativeInvertPack(const dn_bool_pack& pack) -> dn_bool_pack
 {
@@ -228,6 +233,7 @@ void test_suite()
 			dotnet::internal_call_registry registry("Tests.MonoppTest");
 			registry.add_internal_call("ThrowNative", dotnet_internal_call(MonoppTest_ThrowNative));
 			registry.add_internal_call("NativeAdd", dotnet_internal_call(MonoppTest_NativeAdd));
+			registry.add_internal_call("NativeTypeName", dotnet_internal_call(MonoppTest_NativeTypeName));
 
 			dotnet::internal_call_registry pack_registry("Tests.PackTest");
 			pack_registry.add_internal_call("NativeInvertPack",
@@ -2035,6 +2041,93 @@ void test_suite()
 		};
 		EXPECT_NOTHROWS(expression());
 	};
+
+	TEST_CASE("dotnetpp : Type argument through an internal call")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto check = dotnet::make_method_invoker<bool()>(type, "CheckTypeIcall");
+			EXPECT(check() == true);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : base virtual method dispatches to the override")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto base_type = assembly.get_type("Tests", "MonoppTest");
+			auto base_obj = base_type.new_instance();
+			auto derived_obj = assembly.get_type("Tests", "DerivedTest").new_instance();
+			auto base_virtual = dotnet::make_method_invoker<int(int)>(base_type, "VirtualEcho");
+			EXPECT(base_virtual(base_obj, 5) == 6);
+			EXPECT(base_virtual(derived_obj, 5) == 15);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : empty string argument and result")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto echo = dotnet::make_method_invoker<std::string(std::string)>(type, "Function4");
+			EXPECT(echo(std::string{}) == std::string("The string value was: "));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+#if DOTNETPP_BACKEND_CORECLR
+	TEST_CASE("dotnetpp : instance invoke rejects a foreign or missing target")
+	{
+		auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+		auto type_a = assembly.get_type("Tests", "InvokeTargetA");
+		auto type_b = assembly.get_type("Tests", "InvokeTargetB");
+		auto obj_a = type_a.new_instance();
+		auto obj_b = type_b.new_instance();
+		auto bump = dotnet::make_method_invoker<void()>(type_a.get_method("Bump", 0));
+		auto twice = dotnet::make_method_invoker<int(int)>(type_a, "Twice");
+
+		EXPECT_THROWS_AS(bump(obj_b), dotnet::exception);
+		EXPECT_THROWS_AS(twice(obj_b, 1), dotnet::exception);
+		EXPECT_THROWS_AS(bump(dotnet::object{}), dotnet::exception);
+
+		auto field_a = dotnet::make_field_invoker<std::int64_t>(type_b.get_field("a"));
+		auto field_b = dotnet::make_field_invoker<std::int64_t>(type_b.get_field("b"));
+		EXPECT(field_a.get_value(obj_b) == 0);
+		EXPECT(field_b.get_value(obj_b) == 0);
+
+		auto expression = [&]()
+		{
+			bump(obj_a);
+			bump(obj_a);
+			EXPECT(twice(obj_a, 3) == 8);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : pinned object resolves its runtime type")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto base_type = assembly.get_type("Tests", "MonoppTest");
+			auto derived_obj = assembly.get_type("Tests", "DerivedTest").new_instance();
+			dotnet::object declared(derived_obj.get_managed_ptr(), base_type);
+			EXPECT(declared.get_type().get_fullname() == std::string("Tests.MonoppTest"));
+
+			auto pinned = dotnet::make_object_pinned(declared);
+			auto resolved = pinned->get_object();
+			EXPECT(resolved.valid());
+			EXPECT(resolved.get_type().get_fullname() == std::string("Tests.DerivedTest"));
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+#endif
 }
 
 } // namespace dotnetpp

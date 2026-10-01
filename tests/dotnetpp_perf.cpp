@@ -113,6 +113,17 @@ auto PerfTest_NativeEcho(const std::string& s) -> std::string
 	return s;
 }
 
+auto PerfTest_NativeHasType(uint32_t id, const dotnet::type& t) -> bool
+{
+	// Mirrors the engine's HasComponent/GetComponent lookup (hash of the type).
+	return ((t.get_hash() ^ id) & 1u) != 0;
+}
+
+auto PerfTest_NativeTouchObject(const dotnet::object& o) -> int
+{
+	return o.valid() ? 1 : 0;
+}
+
 auto PerfTest_NativeBrighten(const perf_color& c) -> perf_color
 {
 	perf_color result = c;
@@ -193,6 +204,8 @@ int main()
 		registry.add_internal_call("NativeVecLenSq", dotnet_internal_call(PerfTest_NativeVecLenSq));
 		registry.add_internal_call("NativeEcho", dotnet_internal_call(PerfTest_NativeEcho));
 		registry.add_internal_call("NativeBrighten", dotnet_internal_call(PerfTest_NativeBrighten));
+		registry.add_internal_call("NativeHasType", dotnet_internal_call(PerfTest_NativeHasType));
+		registry.add_internal_call("NativeTouchObject", dotnet_internal_call(PerfTest_NativeTouchObject));
 
 		// Compile without debug info so the measurement reflects optimized IL.
 		dotnet::compiler_params cmd;
@@ -261,6 +274,13 @@ int main()
 			auto icall_string = dotnet::make_method_invoker<int(int)>(type, "IcallStringLoop");
 			bench("m2n: icall string echo", 200000, [&](std::int64_t n) { icall_string(static_cast<int>(n)); });
 
+			auto icall_type = dotnet::make_method_invoker<int(int)>(type, "IcallTypeLoop");
+			bench("m2n: icall Type arg (HasComponent)", 2000000,
+				  [&](std::int64_t n) { icall_type(static_cast<int>(n)); });
+
+			auto icall_object = dotnet::make_method_invoker<int(int)>(type, "IcallObjectLoop");
+			bench("m2n: icall object arg", 2000000, [&](std::int64_t n) { icall_object(static_cast<int>(n)); });
+
 			auto icall_color = dotnet::make_method_invoker<float(int)>(type, "IcallColorLoop");
 			bench("m2n: icall converted custom type", 2000000,
 				  [&](std::int64_t n) { icall_color(static_cast<int>(n)); });
@@ -291,6 +311,26 @@ int main()
 						  acc += add_instance(obj, static_cast<int>(i), 1);
 					  }
 					  dotnet::ignore(acc);
+				  });
+
+			auto hook = dotnet::make_method_invoker<void()>(type.get_method("OnHook", 0));
+			bench("n2m: invoke private instance void() hook", 1000000,
+				  [&](std::int64_t n)
+				  {
+					  for(std::int64_t i = 0; i < n; ++i)
+					  {
+						  hook(obj);
+					  }
+				  });
+
+			auto pinned = dotnet::make_object_pinned(obj);
+			bench("n2m: pinned get_object + void() hook", 1000000,
+				  [&](std::int64_t n)
+				  {
+					  for(std::int64_t i = 0; i < n; ++i)
+					  {
+						  hook(pinned->get_object());
+					  }
 				  });
 
 			auto echo_vec = dotnet::make_method_invoker<perf_vec2(perf_vec2)>(type, "EchoVec");

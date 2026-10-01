@@ -391,6 +391,18 @@ class MonoppTest
 	{
 		return NativeAdd(2, 3) == 5;
 	}
+
+	// Type argument through an internal call (the engine's GetComponent shape).
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern string NativeTypeName(Type type);
+
+	public static bool CheckTypeIcall()
+	{
+		return NativeTypeName(typeof(MonoppTest)) == "Tests.MonoppTest" &&
+			   NativeTypeName(typeof(DerivedTest)) == "Tests.DerivedTest" &&
+			   NativeTypeName(typeof(MonoppTest)) == "Tests.MonoppTest" &&
+			   NativeTypeName(null) == string.Empty;
+	}
 }
 
 class DerivedTest : MonoppTest
@@ -401,6 +413,29 @@ class DerivedTest : MonoppTest
 	}
 
 	public int derivedOnlyField = 99;
+}
+
+// Invoke target checks: a method of InvokeTargetA must never run against an
+// InvokeTargetB instance (it would write `count` into B's memory).
+class InvokeTargetA
+{
+	public int count;
+
+	private void Bump()
+	{
+		count++;
+	}
+
+	public int Twice(int value)
+	{
+		return count + value * 2;
+	}
+}
+
+class InvokeTargetB
+{
+	public long a;
+	public long b;
 }
 
 class ObjectArrayHost

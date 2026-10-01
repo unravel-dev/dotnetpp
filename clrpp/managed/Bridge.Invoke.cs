@@ -140,17 +140,17 @@ public static partial class Bridge
             }
 
             // Blittable CreateDelegate path: no object[] / no boxing.
+            var targetObj = Target(targetHandle);
             if (plan.BlittableInvoke != null &&
                 plan.BlittableArgc == argc &&
+                (plan.IsStatic || targetObj != null) &&
                 (argc == 0 || ArgsAreBlobs(args, argc, plan.BlittableArgSizes)) &&
                 (result->Kind == NativeVariant.KindBlob || result->Kind == NativeVariant.KindEmpty))
             {
-                var target = Target(targetHandle);
-                plan.BlittableInvoke(target, args, result);
+                plan.BlittableInvoke(targetObj, args, result);
                 return;
             }
 
-            var targetObj = Target(targetHandle);
             var parameters = plan.Parameters ?? plan.Method.GetParameters();
 
             if (argc > 0)

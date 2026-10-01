@@ -176,6 +176,15 @@ public static unsafe class InternalCalls
         return obj == null ? IntPtr.Zero : GCHandle.ToIntPtr(GCHandle.Alloc(obj));
     }
 
+    /// <summary>
+    /// Session-lifetime interned handle for a Type argument. Interned handles
+    /// are never freed by the call, so no release is needed.
+    /// </summary>
+    public static IntPtr TypeHandle(Type type)
+    {
+        return Bridge.Intern(type);
+    }
+
     /// <summary>Free a handle allocated with AllocHandle.</summary>
     public static void FreeHandle(IntPtr handle)
     {

@@ -194,6 +194,32 @@ struct icall_abi<T, managed_ptr>
 	}
 };
 
+// Type arguments arrive as handles the caller keeps alive for the call
+// (interned by current weaves). Canonicalizing to the interned handle gives
+// clr_type its session-lifetime reference in one bridge call, without the
+// duplicate/free round trips of the generic handle path.
+template <>
+struct icall_abi<clr_type, managed_ptr>
+{
+	using abi_type = clr_handle;
+
+	static auto from_abi(abi_type value) -> clr_type
+	{
+		return value ? clr_type(bridge().intern_handle(value)) : clr_type{};
+	}
+
+	static auto to_abi(const clr_type& value) -> abi_type
+	{
+		auto owned = clr_converter<clr_type>::to_managed(value);
+		return duplicate_handle_for_transfer(owned);
+	}
+};
+
+template <>
+struct icall_abi<const clr_type&, managed_ptr> : icall_abi<clr_type, managed_ptr>
+{
+};
+
 // Strings travel as utf8.
 template <>
 struct icall_abi<std::string, managed_ptr>

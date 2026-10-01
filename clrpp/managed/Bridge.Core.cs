@@ -190,7 +190,10 @@ public static partial class Bridge
                 return null;
 
             case NativeVariant.KindStringUtf8:
-                return ReadUtf8(variant.Data);
+                // Size carries the byte length when native knows it (skips strlen).
+                return variant.Size > 0 && variant.Data != IntPtr.Zero
+                    ? Marshal.PtrToStringUTF8(variant.Data, variant.Size)
+                    : ReadUtf8(variant.Data);
 
             case NativeVariant.KindObjectHandle:
                 return Target(variant.Data);
