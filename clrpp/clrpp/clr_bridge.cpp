@@ -734,7 +734,14 @@ auto start_with_coreclr(const std::string& bridge_dir,
 	if(!s.coreclr_handle)
 	{
 		const auto& framework_dir = runtime.framework_dir;
-		const auto library_path = path_utils::path_join(framework_dir, coreclr_library_name());
+		// Without the runtime library in the framework folder, the platform's library search finds it:
+		// an Android application keeps its native libraries in its package, and its framework folder
+		// holds only the managed assemblies.
+		auto library_path = path_utils::path_join(framework_dir, coreclr_library_name());
+		if(!path_utils::path_exists(library_path))
+		{
+			library_path = coreclr_library_name();
+		}
 		s.coreclr_lib = load_library(library_path);
 		if(!s.coreclr_lib)
 		{
@@ -769,6 +776,20 @@ auto start_with_coreclr(const std::string& bridge_dir,
 		{
 			properties.push_back(std::move(property));
 		}
+#if defined(__ANDROID__)
+		// The Android runtime pack ships no ICU, so culture data is invariant unless the runtimeconfig
+		// says otherwise.
+		const bool has_globalization_mode = std::any_of(properties.begin(),
+														 properties.end(),
+														 [](const std::pair<std::string, std::string>& property)
+														 {
+															 return property.first == "System.Globalization.Invariant";
+														 });
+		if(!has_globalization_mode)
+		{
+			properties.emplace_back("System.Globalization.Invariant", "true");
+		}
+#endif
 
 		std::vector<const char*> keys;
 		std::vector<const char*> values;
