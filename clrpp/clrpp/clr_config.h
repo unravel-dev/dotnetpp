@@ -16,6 +16,10 @@
 #define CLRPP_DOTNET_VERSION "9.0"
 #endif
 
+#ifndef CLRPP_DOTNET_PREFERRED_VERSION
+#define CLRPP_DOTNET_PREFERRED_VERSION "10.0"
+#endif
+
 namespace clr
 {
 template <typename T>
@@ -33,6 +37,29 @@ inline auto managed_runtime_dir() -> const char*
 inline auto default_dotnet_version() -> const char*
 {
 	return CLRPP_DOTNET_VERSION;
+}
+
+/// The .NET version (major.minor) the runtime prefers: the newest installed release of its major
+/// is started, and a runtime of another major at or above default_dotnet_version() is only a
+/// fallback. Set from CMake (CLRPP_DOTNET_PREFERRED_VERSION); overridable per init via
+/// compiler_paths::preferred_dotnet_version.
+inline auto preferred_dotnet_version() -> const char*
+{
+	return CLRPP_DOTNET_PREFERRED_VERSION;
+}
+
+/// Folder beside the bridge with the framework reference assemblies scripts compile against
+/// (ref/net<version>, copied by the bridge build). Only the compiler uses it.
+inline auto reference_assemblies_dir_name() -> const char*
+{
+	return "ref";
+}
+
+/// The runtimeconfig the hostfxr host writes beside the bridge's own, pinned to the runtime it
+/// selected, when the dotnet root also holds a newer runtime the bridge's own would start.
+inline auto pinned_runtimeconfig_name() -> const char*
+{
+	return "Clrpp.Managed.selected.runtimeconfig.json";
 }
 
 /// How clr::init starts the runtime.

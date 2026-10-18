@@ -71,6 +71,9 @@ using hostfxr_initialize_for_runtime_config_fn = int32_t(HOSTFXR_CALLTYPE*)(cons
 																			hostfxr_handle*);
 using hostfxr_get_runtime_delegate_fn = int32_t(HOSTFXR_CALLTYPE*)(hostfxr_handle, hostfxr_delegate_type, void**);
 using hostfxr_close_fn = int32_t(HOSTFXR_CALLTYPE*)(hostfxr_handle);
+using hostfxr_get_runtime_property_value_fn = int32_t(HOSTFXR_CALLTYPE*)(hostfxr_handle,
+																		 const char_t*,
+																		 const char_t**);
 
 using load_assembly_and_get_function_pointer_fn = int32_t(CORECLR_DELEGATE_CALLTYPE*)(const char_t* assembly_path,
 																					  const char_t* type_name,
@@ -129,6 +132,9 @@ struct bridge_state
 	std::string managed_assembly_path;
 	std::string dotnet_root;
 	std::string dotnet_version = default_dotnet_version();
+	std::string preferred_dotnet_version = clr::preferred_dotnet_version();
+	std::string runtime_version;
+	std::string runtime_framework_dir;
 };
 
 auto state() -> bridge_state&
@@ -309,12 +315,8 @@ namespace bridge_detail
 
 namespace
 {
-// A dotnet root is only usable when it actually contains a versioned
-// host/fxr directory with the hostfxr library. Merely checking that the
-// root directory exists is not enough: e.g. on Ubuntu the Microsoft feed
-// installs to /usr/share/dotnet while the distro packages use
-// /usr/lib/dotnet, and an empty leftover directory at either location
-// must not shadow the real installation.
+/// Whether a dotnet root holds a versioned host/fxr directory with the hostfxr library; the
+/// automatic host starts the runtime through it when it does.
 auto has_hostfxr(const std::string& root) -> bool
 {
 	auto fxr_base = path_utils::path_join(path_utils::path_join(root, "host"), "fxr");
@@ -325,21 +327,20 @@ auto has_hostfxr(const std::string& root) -> bool
 	}
 	return path_utils::path_exists(path_utils::path_join(fxr_dir, hostfxr_library_name()));
 }
-} // namespace
 
-auto locate_dotnet_root(const std::string& override_root) -> std::string
+/// The dotnet roots to look for runtimes in. An explicit override or DOTNET_ROOT expresses user
+/// intent and is the only root; otherwise every platform location, in order of preference.
+auto candidate_dotnet_roots(const std::string& override_root) -> std::vector<std::string>
 {
-	// Explicit override and DOTNET_ROOT express user intent - honor them
-	// as-is and let initialization surface a clear error if they are wrong.
 	if(!override_root.empty())
 	{
-		return override_root;
+		return {override_root};
 	}
 
 	auto env_root = path_utils::get_env("DOTNET_ROOT");
 	if(!env_root.empty())
 	{
-		return env_root;
+		return {env_root};
 	}
 
 	std::vector<std::string> candidates;
@@ -385,21 +386,9 @@ auto locate_dotnet_root(const std::string& override_root) -> std::string
 		candidates.push_back(path_utils::path_join(home, ".dotnet")); // dotnet-install scripts
 	}
 
-	for(const auto& candidate : candidates)
-	{
-		if(has_hostfxr(candidate))
-		{
-			return candidate;
-		}
-	}
-
-	// Nothing validated - return the first platform default so the caller's
-	// error message points at a sensible location.
-	return candidates.front();
+	return candidates;
 }
 
-namespace
-{
 using bootstrap_fn = int32_t(CLRPP_CALLTYPE*)(void**, int32_t);
 
 /// Finds Clrpp.Managed.dll. The bridge and its dependencies (Mono.Cecil, Microsoft.Diagnostics.*)
@@ -452,31 +441,75 @@ auto locate_bridge(const std::string& assembly_dir,
 	return false;
 }
 
-/// The newest released Microsoft.NETCore.App at or above the target major, like hostfxr's
-/// LatestMajor roll-forward. Preview builds are skipped, as hostfxr skips them by default.
-auto pick_shared_framework(const std::string& dotnet_root, const std::string& minimum_version) -> std::string
+/// A Microsoft.NETCore.App installation the runtime can start.
+struct runtime_choice
 {
-	const auto base = path_utils::path_join(path_utils::path_join(dotnet_root, "shared"), "Microsoft.NETCore.App");
+	std::string dotnet_root;
+	std::string framework_dir;
+	std::string version;
+};
+
+/// The newest released runtime of the preferred major across the roots; without one, the newest
+/// at or above the minimum major (a newer major than the preferred one included). Preview builds
+/// are skipped, as hostfxr skips them by default. Empty when nothing qualifies.
+auto select_runtime(const std::vector<std::string>& dotnet_roots,
+					const std::string& minimum_version,
+					const std::string& preferred_version) -> runtime_choice
+{
 	const auto minimum = path_utils::parse_version(minimum_version);
-	std::string best;
-	std::vector<int> best_version;
-	for(const auto& name : path_utils::list_subdirectories(base))
+	const auto preferred = path_utils::parse_version(preferred_version);
+	runtime_choice best_preferred;
+	runtime_choice best_fallback;
+	std::vector<int> best_preferred_version;
+	std::vector<int> best_fallback_version;
+	const auto is_newer = [](const std::vector<int>& candidate, const std::vector<int>& best)
 	{
-		const auto version = path_utils::parse_version(name);
-		const bool is_preview = name.find('-') != std::string::npos;
-		const bool is_too_old = !minimum.empty() && !version.empty() && version[0] < minimum[0];
-		if(version.empty() || is_preview || is_too_old)
+		return best.empty() || std::lexicographical_compare(best.begin(), best.end(), candidate.begin(), candidate.end());
+	};
+	for(const auto& root : dotnet_roots)
+	{
+		const auto base = path_utils::path_join(path_utils::path_join(root, "shared"), "Microsoft.NETCore.App");
+		for(const auto& name : path_utils::list_subdirectories(base))
 		{
-			continue;
-		}
-		if(best.empty() ||
-		   std::lexicographical_compare(best_version.begin(), best_version.end(), version.begin(), version.end()))
-		{
-			best = name;
-			best_version = version;
+			const auto version = path_utils::parse_version(name);
+			const bool is_preview = name.find('-') != std::string::npos;
+			const bool is_too_old = !minimum.empty() && !version.empty() && version[0] < minimum[0];
+			if(version.empty() || is_preview || is_too_old)
+			{
+				continue;
+			}
+			const runtime_choice candidate{root, path_utils::path_join(base, name), name};
+			const bool is_preferred_major = !preferred.empty() && version[0] == preferred[0];
+			if(is_preferred_major && is_newer(version, best_preferred_version))
+			{
+				best_preferred = candidate;
+				best_preferred_version = version;
+			}
+			if(is_newer(version, best_fallback_version))
+			{
+				best_fallback = candidate;
+				best_fallback_version = version;
+			}
 		}
 	}
-	return best.empty() ? std::string{} : path_utils::path_join(base, best);
+	return best_preferred.framework_dir.empty() ? best_fallback : best_preferred;
+}
+
+/// Whether the runtime's root holds a released runtime newer than it, which the bridge's
+/// runtimeconfig (rollForward LatestMajor) would make hostfxr start instead.
+auto has_newer_runtime(const runtime_choice& runtime) -> bool
+{
+	const auto selected = path_utils::parse_version(runtime.version);
+	const auto base = path_utils::path_join(path_utils::path_join(runtime.dotnet_root, "shared"), "Microsoft.NETCore.App");
+	const auto names = path_utils::list_subdirectories(base);
+	return std::any_of(names.begin(),
+					   names.end(),
+					   [&selected](const std::string& name)
+					   {
+						   const auto version = path_utils::parse_version(name);
+						   return name.find('-') == std::string::npos &&
+								  std::lexicographical_compare(selected.begin(), selected.end(), version.begin(), version.end());
+					   });
 }
 
 /// Appends every assembly of dir to a path list, skipping simple names already listed: the first
@@ -547,14 +580,51 @@ auto read_config_properties(const std::string& runtimeconfig) -> std::vector<std
 	return properties;
 }
 
-/// Starts the runtime through hostfxr from the bridge's runtimeconfig and binds Bootstrap.
+/// A copy of the bridge's runtimeconfig pinned to one runtime version, so hostfxr starts exactly
+/// the selected runtime instead of rolling forward to the newest major. It keeps the
+/// configProperties and sits beside the bridge, so the runtime's base directory stays the
+/// bridge's. Returns the original runtimeconfig when the copy cannot be written.
+auto write_pinned_runtimeconfig(const std::string& runtimeconfig, const std::string& version) -> std::string
+{
+	std::ifstream source(runtimeconfig.c_str());
+	const std::string text((std::istreambuf_iterator<char>(source)), std::istreambuf_iterator<char>());
+	const auto section = text.find("\"configProperties\"");
+	const auto section_end = section == std::string::npos ? std::string::npos : text.find('}', section);
+	const std::string properties =
+		section_end == std::string::npos ? std::string{} : text.substr(section, section_end - section + 1);
+
+	std::string content = "{\n  \"runtimeOptions\": {\n    \"rollForward\": \"LatestPatch\",\n";
+	content += "    \"framework\": {\n      \"name\": \"Microsoft.NETCore.App\",\n";
+	content += "      \"version\": \"" + version + "\"\n    }";
+	content += properties.empty() ? std::string{} : ",\n    " + properties;
+	content += "\n  }\n}\n";
+
+	const auto slash = runtimeconfig.find_last_of("/\\");
+	const auto pinned = path_utils::path_join(runtimeconfig.substr(0, slash), pinned_runtimeconfig_name());
+	std::ifstream existing(pinned.c_str());
+	const std::string current((std::istreambuf_iterator<char>(existing)), std::istreambuf_iterator<char>());
+	if(current == content)
+	{
+		return pinned;
+	}
+	std::ofstream file(pinned.c_str(), std::ios::trunc);
+	file << content;
+	if(!file)
+	{
+		log_message("clrpp: cannot write " + pinned + "; hostfxr picks the runtime from " + runtimeconfig, "trace");
+		return runtimeconfig;
+	}
+	return pinned;
+}
+
+/// Starts the selected runtime through the hostfxr of its root and binds Bootstrap. Records the
+/// shared framework hostfxr actually started.
 auto start_with_hostfxr(const std::string& managed_dll,
 						const std::string& runtimeconfig,
-						const std::string& dotnet_root,
-						bool is_root_overridden) -> bootstrap_fn
+						const runtime_choice& runtime) -> bootstrap_fn
 {
 	auto& s = state();
-	auto fxr_base = path_utils::path_join(path_utils::path_join(dotnet_root, "host"), "fxr");
+	auto fxr_base = path_utils::path_join(path_utils::path_join(runtime.dotnet_root, "host"), "fxr");
 	auto fxr_dir = path_utils::pick_highest_version_dir(fxr_base);
 	if(fxr_dir.empty())
 	{
@@ -574,6 +644,8 @@ auto start_with_hostfxr(const std::string& managed_dll,
 		get_symbol(s.hostfxr_lib, "hostfxr_initialize_for_runtime_config"));
 	auto get_delegate_fn = reinterpret_cast<hostfxr_get_runtime_delegate_fn>(
 		get_symbol(s.hostfxr_lib, "hostfxr_get_runtime_delegate"));
+	auto get_property_fn = reinterpret_cast<hostfxr_get_runtime_property_value_fn>(
+		get_symbol(s.hostfxr_lib, "hostfxr_get_runtime_property_value"));
 	s.close_fn = reinterpret_cast<hostfxr_close_fn>(get_symbol(s.hostfxr_lib, "hostfxr_close"));
 
 	if(!init_fn || !get_delegate_fn || !s.close_fn)
@@ -582,11 +654,14 @@ auto start_with_hostfxr(const std::string& managed_dll,
 		return nullptr;
 	}
 
-	auto config_path = path_utils::to_native_path(runtimeconfig);
+	// The bridge's runtimeconfig starts the newest runtime of the root; a pinned copy only when that is
+	// not the selected one.
+	const std::string selected_runtimeconfig =
+		has_newer_runtime(runtime) ? write_pinned_runtimeconfig(runtimeconfig, runtime.version) : runtimeconfig;
+	auto config_path = path_utils::to_native_path(selected_runtimeconfig);
 
-	// Only pass explicit parameters when the caller overrides the dotnet
-	// root; otherwise let hostfxr use its own detection.
-	auto root_path = path_utils::to_native_path(to_runtime_path(dotnet_root));
+	// The selected runtime's root, so hostfxr resolves the framework from the same installation.
+	auto root_path = path_utils::to_native_path(to_runtime_path(runtime.dotnet_root));
 	auto host_path = path_utils::to_native_path(path_utils::current_executable_path());
 
 	hostfxr_initialize_parameters params{};
@@ -594,7 +669,7 @@ auto start_with_hostfxr(const std::string& managed_dll,
 	params.host_path = host_path.empty() ? nullptr : host_path.c_str();
 	params.dotnet_root = root_path.c_str();
 
-	int32_t rc = init_fn(config_path.c_str(), is_root_overridden ? &params : nullptr, &s.context);
+	int32_t rc = init_fn(config_path.c_str(), &params, &s.context);
 	// 0 = success, 1 = success_host_already_initialized, 2 = success_different_runtime_properties
 	if(rc < 0 || rc > 2 || s.context == nullptr)
 	{
@@ -602,6 +677,22 @@ auto start_with_hostfxr(const std::string& managed_dll,
 						std::to_string(rc),
 					"error");
 		return nullptr;
+	}
+
+	// The framework's deps file names the folder of the runtime that actually started.
+	s.runtime_framework_dir = runtime.framework_dir;
+	s.runtime_version = runtime.version;
+	const auto deps_file_property = path_utils::to_native_path("FX_DEPS_FILE");
+	const char_t* deps_file = nullptr;
+	if(get_property_fn && get_property_fn(s.context, deps_file_property.c_str(), &deps_file) == 0 && deps_file)
+	{
+		const auto deps_path = path_utils::from_native_path(deps_file);
+		const auto slash = deps_path.find_last_of("/\\");
+		if(slash != std::string::npos)
+		{
+			s.runtime_framework_dir = deps_path.substr(0, slash);
+			s.runtime_version = s.runtime_framework_dir.substr(s.runtime_framework_dir.find_last_of("/\\") + 1);
+		}
 	}
 
 	void* load_assembly_ptr = nullptr;
@@ -632,25 +723,17 @@ auto start_with_hostfxr(const std::string& managed_dll,
 	return bootstrap;
 }
 
-/// Starts the runtime by loading coreclr from a shared framework of the dotnet root and handing it
-/// the properties hostfxr would build: the framework and bridge assemblies, the native search
-/// paths and the runtimeconfig's configProperties. Then binds Bootstrap.
+/// Starts the runtime by loading coreclr from the selected shared framework and handing it the
+/// properties hostfxr would build: the framework and bridge assemblies, the native search paths and
+/// the runtimeconfig's configProperties. Then binds Bootstrap.
 auto start_with_coreclr(const std::string& bridge_dir,
 						const std::string& runtimeconfig,
-						const std::string& dotnet_root) -> bootstrap_fn
+						const runtime_choice& runtime) -> bootstrap_fn
 {
 	auto& s = state();
 	if(!s.coreclr_handle)
 	{
-		const auto framework_dir = pick_shared_framework(dotnet_root, s.dotnet_version);
-		if(framework_dir.empty())
-		{
-			log_message("clrpp: no Microsoft.NETCore.App " + s.dotnet_version + " or newer under " +
-							path_utils::path_join(dotnet_root, "shared"),
-						"error");
-			return nullptr;
-		}
-
+		const auto& framework_dir = runtime.framework_dir;
 		const auto library_path = path_utils::path_join(framework_dir, coreclr_library_name());
 		s.coreclr_lib = load_library(library_path);
 		if(!s.coreclr_lib)
@@ -709,6 +792,8 @@ auto start_with_coreclr(const std::string& bridge_dir,
 			log_message("clrpp: coreclr_initialize failed with " + to_hex(hr), "error");
 			return nullptr;
 		}
+		s.runtime_framework_dir = framework_dir;
+		s.runtime_version = runtime.version;
 		log_message("clrpp: coreclr started from " + framework_dir, "trace");
 	}
 
@@ -744,6 +829,7 @@ auto initialize(const std::string& assembly_dir,
 				const std::string& dotnet_root_override,
 				const std::string& managed_dir,
 				const std::string& dotnet_version,
+				const std::string& preferred_dotnet_version,
 				runtime_host host) -> bool
 {
 	auto& s = state();
@@ -755,6 +841,10 @@ auto initialize(const std::string& assembly_dir,
 	if(!dotnet_version.empty())
 	{
 		s.dotnet_version = dotnet_version;
+	}
+	if(!preferred_dotnet_version.empty())
+	{
+		s.preferred_dotnet_version = preferred_dotnet_version;
 	}
 
 	std::string bridge_dir;
@@ -770,12 +860,25 @@ auto initialize(const std::string& assembly_dir,
 		write_default_runtimeconfig(runtimeconfig, s.dotnet_version);
 	}
 
-	auto dotnet_root = locate_dotnet_root(dotnet_root_override);
+	const auto roots = candidate_dotnet_roots(dotnet_root_override);
+	const auto runtime = select_runtime(roots, s.dotnet_version, s.preferred_dotnet_version);
+	if(runtime.framework_dir.empty())
+	{
+		std::string searched;
+		for(const auto& root : roots)
+		{
+			searched += (searched.empty() ? "" : ", ") + root;
+		}
+		log_message("clrpp: no .NET " + s.dotnet_version + " or newer runtime found (searched: " + searched +
+						"). Install .NET " + s.preferred_dotnet_version + ".",
+					"error");
+		return false;
+	}
+
 	const bool use_hostfxr =
-		host == runtime_host::hostfxr || (host == runtime_host::automatic && has_hostfxr(dotnet_root));
-	const auto bootstrap = use_hostfxr
-							   ? start_with_hostfxr(managed_dll, runtimeconfig, dotnet_root, !dotnet_root_override.empty())
-							   : start_with_coreclr(bridge_dir, runtimeconfig, dotnet_root);
+		host == runtime_host::hostfxr || (host == runtime_host::automatic && has_hostfxr(runtime.dotnet_root));
+	const auto bootstrap = use_hostfxr ? start_with_hostfxr(managed_dll, runtimeconfig, runtime)
+									   : start_with_coreclr(bridge_dir, runtimeconfig, runtime);
 	if(!bootstrap)
 	{
 		release_failed_start();
@@ -800,7 +903,7 @@ auto initialize(const std::string& assembly_dir,
 	bootstrap(reinterpret_cast<void**>(&s.table), expected_count);
 
 	s.managed_assembly_path = managed_dll;
-	s.dotnet_root = dotnet_root;
+	s.dotnet_root = runtime.dotnet_root;
 	s.host = use_hostfxr ? runtime_host::hostfxr : runtime_host::coreclr;
 	s.alive = true;
 
@@ -809,8 +912,8 @@ auto initialize(const std::string& assembly_dir,
 	s.table.internal_calls_install(reinterpret_cast<void*>(&native_icall_resolver),
 								   reinterpret_cast<void*>(&native_pending_exception_query));
 
-	log_message(std::string("clrpp: runtime initialized through ") + (use_hostfxr ? "hostfxr" : "coreclr") +
-					" (bridge: " + s.managed_assembly_path + ")",
+	log_message("clrpp: runtime " + s.runtime_version + " initialized through " +
+					(use_hostfxr ? "hostfxr" : "coreclr") + " (bridge: " + s.managed_assembly_path + ")",
 				"trace");
 	return true;
 }
@@ -858,6 +961,21 @@ auto dotnet_version() -> const std::string&
 auto active_host() -> runtime_host
 {
 	return state().host;
+}
+
+auto preferred_dotnet_version() -> const std::string&
+{
+	return state().preferred_dotnet_version;
+}
+
+auto runtime_version() -> const std::string&
+{
+	return state().runtime_version;
+}
+
+auto runtime_framework_dir() -> const std::string&
+{
+	return state().runtime_framework_dir;
 }
 
 } // namespace bridge_detail

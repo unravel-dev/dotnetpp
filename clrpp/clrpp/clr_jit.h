@@ -28,12 +28,16 @@ struct compiler_paths
 	/// Use assembly_dir to point at an explicit bridge location instead.
 	std::string managed_dir = managed_runtime_dir();
 
-	/// Target .NET version as major.minor (e.g. "9.0"). Written into the
-	/// fallback runtimeconfig and retrievable via get_dotnet_version() so
-	/// tooling (csproj generation, deploys) stays consistent. Note: the
-	/// actual runtime loaded is still governed by the bridge runtimeconfig
-	/// (rollForward LatestMajor picks the newest installed runtime).
+	/// Target .NET version as major.minor (e.g. "9.0"): the framework scripts
+	/// compile against and the oldest runtime major that may start. Written
+	/// into the fallback runtimeconfig and retrievable via get_dotnet_version()
+	/// so tooling (csproj generation) stays consistent.
 	std::string dotnet_version = default_dotnet_version();
+
+	/// Preferred runtime version as major.minor (e.g. "10.0"): the newest installed release of
+	/// its major is started. Without one, the newest runtime at or above dotnet_version is the
+	/// fallback (is_preferred_runtime() is then false).
+	std::string preferred_dotnet_version = clr::preferred_dotnet_version();
 
 	/// How the runtime is started. config_dir, when set, is the dotnet root for either host.
 	runtime_host host = runtime_host::automatic;
@@ -79,6 +83,17 @@ auto get_dotnet_version() -> const std::string&;
 
 /// The host that started the runtime (hostfxr or coreclr, never automatic) once init succeeded.
 auto get_runtime_host() -> runtime_host;
+
+/// Preferred runtime version (major.minor) configured at init.
+auto get_preferred_dotnet_version() -> const std::string&;
+
+/// The version of the runtime that was started (e.g. "10.0.13") and the shared framework folder
+/// it runs from; empty before init.
+auto get_runtime_version() -> const std::string&;
+auto get_runtime_framework_dir() -> const std::string&;
+
+/// Whether the runtime that was started is of the preferred major.
+auto is_preferred_runtime() -> bool;
 
 struct compiler_params
 {

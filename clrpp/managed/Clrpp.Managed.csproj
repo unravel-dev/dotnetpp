@@ -21,6 +21,19 @@
     <!-- NuGet dependencies (Mono.Cecil) must land next to the bridge dll. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
+  <!-- The framework reference assemblies of the target framework, beside the bridge in
+       ref/<tfm>: native script compiles reference these, so the script API surface is the
+       target framework's whatever SDK is installed (an SDK of a newer major restores them
+       from NuGet). -->
+  <Target Name="CopyFrameworkReferenceAssemblies" AfterTargets="Build">
+    <ItemGroup>
+      <ClrppFrameworkReference Include="@(ReferencePath)"
+                               Condition="'%(ReferencePath.FrameworkReferenceName)' == 'Microsoft.NETCore.App'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ClrppFrameworkReference)"
+          DestinationFolder="$(OutDir)ref/$(TargetFramework)"
+          SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="PrintCompilerInfo" BeforeTargets="CoreCompile">
     <Message Importance="high"
             Text="TargetFramework=$(TargetFramework)" />

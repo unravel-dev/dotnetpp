@@ -10,11 +10,13 @@ namespace clr
 namespace path_utils
 {
 
-/// UTF-8 to hostfxr/Win32 path encoding (wstring on Windows, passthrough elsewhere).
+/// UTF-8 to hostfxr/Win32 path encoding (wstring on Windows, passthrough elsewhere), and back.
 #ifdef _WIN32
 auto to_native_path(const std::string& utf8) -> std::wstring;
+auto from_native_path(const std::wstring& native) -> std::string;
 #else
 auto to_native_path(const std::string& utf8) -> std::string;
+auto from_native_path(const std::string& native) -> std::string;
 #endif
 
 auto path_join(const std::string& a, const std::string& b) -> std::string;

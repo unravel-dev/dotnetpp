@@ -46,10 +46,24 @@ auto to_native_path(const std::string& utf8) -> std::wstring
 	utf8::unchecked::utf8to16(utf8.begin(), utf8.end(), std::back_inserter(u16));
 	return std::wstring(u16.begin(), u16.end());
 }
+
+auto from_native_path(const std::wstring& native) -> std::string
+{
+	std::string utf8;
+	utf8.reserve(native.size());
+	const std::u16string u16(native.begin(), native.end());
+	utf8::unchecked::utf16to8(u16.begin(), u16.end(), std::back_inserter(utf8));
+	return utf8;
+}
 #else
 auto to_native_path(const std::string& utf8) -> std::string
 {
 	return utf8;
+}
+
+auto from_native_path(const std::string& native) -> std::string
+{
+	return native;
 }
 #endif
 

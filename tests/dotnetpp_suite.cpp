@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <list>
 #include <map>
@@ -1995,6 +1996,34 @@ void test_suite()
 		};
 		EXPECT_NOTHROWS(expression());
 	};
+
+#if DOTNETPP_BACKEND_CORECLR
+	TEST_CASE("dotnetpp : runtime selection and compile surface")
+	{
+		auto expression = [&]()
+		{
+			constexpr int CSHARP_VERSION_ABOVE_DOTNET_MAJOR = 4;
+			const auto& runtime_version = dotnet::get_runtime_version();
+			const int runtime_major = std::atoi(runtime_version.c_str());
+			const int target_major = std::atoi(dotnet::get_dotnet_version().c_str());
+			const int preferred_major = std::atoi(dotnet::get_preferred_dotnet_version().c_str());
+			EXPECT(!runtime_version.empty());
+			EXPECT(!dotnet::get_runtime_framework_dir().empty());
+			EXPECT(runtime_major >= target_major);
+			EXPECT(dotnet::is_preferred_runtime() == (runtime_major == preferred_major));
+
+			// Scripts compile for the target framework whatever runtime and SDK are installed.
+			dotnet::compiler_params params;
+			params.files = {DATA_DIR DOTNETPP_TESTS_FIXTURE};
+			params.output_name = DATA_DIR "dotnetpp_tests_managed_surface.dll";
+			const auto rsp = dotnet::create_compile_rsp(params);
+			const auto language_version = std::to_string(target_major + CSHARP_VERSION_ABOVE_DOTNET_MAJOR);
+			EXPECT(rsp.find("-langversion:" + language_version) != std::string::npos);
+			EXPECT(rsp.find("net" + dotnet::get_dotnet_version()) != std::string::npos);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+#endif
 
 	TEST_CASE("dotnetpp : child domain")
 	{

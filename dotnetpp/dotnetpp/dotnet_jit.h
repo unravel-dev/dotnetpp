@@ -75,12 +75,23 @@ using clr::is_debugger_attached;
 /// Name of the managed bridge folder deployed next to the executables.
 using clr::managed_runtime_dir;
 
+/// Editor-only files of the bridge folder: the reference assemblies scripts compile against and the
+/// runtimeconfig a start pins to the selected runtime.
+using clr::reference_assemblies_dir_name;
+using clr::pinned_runtimeconfig_name;
+
 /// Target .NET version (major.minor) configured at init.
 using clr::get_dotnet_version;
 
 /// How the runtime is started (compiler_paths::host), and which host started it.
 using clr::runtime_host;
 using clr::get_runtime_host;
+
+/// The preferred runtime version, the runtime that was started and whether it is the preferred one.
+using clr::get_preferred_dotnet_version;
+using clr::get_runtime_version;
+using clr::get_runtime_framework_dir;
+using clr::is_preferred_runtime;
 
 } // namespace dotnet
 #endif

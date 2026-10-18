@@ -6,6 +6,9 @@ set(CLRPP_MANAGED_DIR "clrpp" CACHE STRING
 set(CLRPP_DOTNET_VERSION "9.0" CACHE STRING
 	"Target .NET version (major.minor). Drives the bridge TargetFramework (net<ver>), the minimum SDK required to build it, and the native default_dotnet_version()")
 
+set(CLRPP_DOTNET_PREFERRED_VERSION "10.0" CACHE STRING
+	"Preferred .NET runtime (major.minor): started when installed; other runtimes at or above CLRPP_DOTNET_VERSION are a fallback")
+
 file(GLOB libsrc clrpp/*.h clrpp/*.cpp)
 
 add_library(${target_name} ${libsrc})
@@ -15,6 +18,7 @@ target_compile_definitions(${target_name}
     PUBLIC
         CLRPP_MANAGED_DIR="${CLRPP_MANAGED_DIR}"
         CLRPP_DOTNET_VERSION="${CLRPP_DOTNET_VERSION}"
+        CLRPP_DOTNET_PREFERRED_VERSION="${CLRPP_DOTNET_PREFERRED_VERSION}"
 )
 
 target_include_directories(${target_name}

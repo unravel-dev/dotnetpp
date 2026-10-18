@@ -19,10 +19,37 @@ namespace
 {
 std::unique_ptr<compiler_paths> g_comp_paths;
 
+/// The highest versioned subdirectory of base whose major.minor is target's; empty when none is.
+auto pick_matching_version_subdir(const std::string& base, const std::vector<int>& target) -> std::string
+{
+	std::string best;
+	std::vector<int> best_version;
+	for(const auto& name : path_utils::list_subdirectories(base))
+	{
+		const auto version = path_utils::parse_version(name);
+		const bool matches = version.size() >= 2 && target.size() >= 2 && version[0] == target[0] &&
+							 version[1] == target[1] && name.find('-') == std::string::npos;
+		if(matches && (best.empty() || std::lexicographical_compare(best_version.begin(),
+																	best_version.end(),
+																	version.begin(),
+																	version.end())))
+		{
+			best = name;
+			best_version = version;
+		}
+	}
+	return best;
+}
+
 /*
- * Directory with the framework reference assemblies
- * (packs/Microsoft.NETCore.App.Ref/<ver>/ref/netX.Y). Unlike mcs, csc has no
- * implicit standard library, so compile commands reference all of these.
+ * Directory with the framework reference assemblies of the target framework
+ * (CLRPP_DOTNET_VERSION). Unlike mcs, csc has no implicit standard library, so
+ * compile commands reference all of these. The bridge build copies them beside
+ * the bridge (ref/net<version>), which pins the script API surface whatever SDK
+ * is installed; an installed targeting pack of exactly that version is the
+ * fallback. A pack of another version is never used: scripts compiled against
+ * a newer surface fail to load types on an older runtime (GetTypes returns
+ * empty via ReflectionTypeLoadException) and can use APIs it lacks.
  */
 auto find_reference_assemblies_dir() -> std::string
 {
@@ -31,11 +58,20 @@ auto find_reference_assemblies_dir() -> std::string
 		return g_comp_paths->reference_assemblies_dir;
 	}
 
-	// Compile against the same TFM the bridge / shipped runtime target
-	// (CLRPP_DOTNET_VERSION). Picking the highest installed Ref pack breaks
-	// deploy: scripts compiled vs net10 fail to load types on a pruned net9
-	// runtime root (GetTypes returns empty via ReflectionTypeLoadException).
-	const auto preferred = path_utils::parse_version(get_dotnet_version());
+	const auto tfm = "net" + get_dotnet_version();
+	const auto& bridge = bridge_detail::managed_assembly_path();
+	const auto slash = bridge.find_last_of("/\\");
+	if(slash != std::string::npos)
+	{
+		const auto reference_root = path_utils::path_join(bridge.substr(0, slash), reference_assemblies_dir_name());
+		const auto pinned = path_utils::path_join(reference_root, tfm);
+		if(path_utils::path_exists(pinned))
+		{
+			return pinned;
+		}
+	}
+
+	const auto target = path_utils::parse_version(get_dotnet_version());
 
 	std::vector<std::string> roots;
 	if(!bridge_detail::dotnet_root().empty())
@@ -50,22 +86,28 @@ auto find_reference_assemblies_dir() -> std::string
 	for(const auto& root : roots)
 	{
 		auto packs = root + "/packs/Microsoft.NETCore.App.Ref";
-		auto version = path_utils::pick_highest_version_subdir(packs, preferred);
+		auto version = pick_matching_version_subdir(packs, target);
 		if(version.empty())
 		{
 			continue;
 		}
 
-		auto ref_root = packs + "/" + version + "/ref";
-		auto tfm = path_utils::pick_highest_version_subdir(ref_root, preferred);
-		if(tfm.empty())
+		auto ref_dir = packs + "/" + version + "/ref/" + tfm;
+		if(path_utils::path_exists(ref_dir))
 		{
-			continue;
+			return ref_dir;
 		}
-
-		return ref_root + "/" + tfm;
 	}
 	return {};
+}
+
+/// The C# version a project of the target framework defaults to (net5.0 -> 9, ..., net9.0 -> 13).
+/// csc gets it explicitly, so the compiler of a newer SDK accepts no syntax the target's lacks.
+auto csharp_language_version() -> std::string
+{
+	constexpr int CSHARP_VERSION_ABOVE_DOTNET_MAJOR = 4;
+	const auto version = path_utils::parse_version(get_dotnet_version());
+	return version.empty() ? std::string("default") : std::to_string(version[0] + CSHARP_VERSION_ABOVE_DOTNET_MAJOR);
 }
 
 auto clr_dotnet_executable() -> std::string
@@ -181,6 +223,7 @@ auto build_csc_args(const compiler_params& params, csc_arg_style style) -> std::
 	std::vector<std::string> args;
 	args.emplace_back("-nologo");
 	args.emplace_back("-nostdlib+");
+	args.emplace_back("-langversion:" + csharp_language_version());
 
 	for(const auto& ref : framework_references())
 	{
@@ -423,6 +466,7 @@ auto init(const compiler_paths& paths, const debugging_config& debugging, const 
 								  paths.config_dir,
 								  paths.managed_dir,
 								  paths.dotnet_version,
+								  paths.preferred_dotnet_version,
 								  paths.host))
 	{
 		return false;
@@ -446,6 +490,28 @@ auto get_dotnet_version() -> const std::string&
 auto get_runtime_host() -> runtime_host
 {
 	return bridge_detail::active_host();
+}
+
+auto get_preferred_dotnet_version() -> const std::string&
+{
+	return bridge_detail::preferred_dotnet_version();
+}
+
+auto get_runtime_version() -> const std::string&
+{
+	return bridge_detail::runtime_version();
+}
+
+auto get_runtime_framework_dir() -> const std::string&
+{
+	return bridge_detail::runtime_framework_dir();
+}
+
+auto is_preferred_runtime() -> bool
+{
+	const auto running = path_utils::parse_version(get_runtime_version());
+	const auto preferred = path_utils::parse_version(get_preferred_dotnet_version());
+	return !running.empty() && !preferred.empty() && running[0] == preferred[0];
 }
 
 void shutdown()

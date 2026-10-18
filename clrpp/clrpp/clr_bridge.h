@@ -179,17 +179,24 @@ struct exports
 // Runtime lifecycle, used by clr::init / clr::shutdown. managed_dir is the
 // bridge subfolder name probed next to assembly_dir/exe/cwd; empty means the
 // compile-time default (CLRPP_MANAGED_DIR). dotnet_version (major.minor,
-// e.g. "9.0") is used for the fallback runtimeconfig and exposed to tooling;
-// empty means the compile-time default. host selects how the runtime starts.
+// e.g. "9.0") is used for the fallback runtimeconfig and exposed to tooling,
+// and is the oldest major that may start; preferred_dotnet_version is the
+// major started when installed. Empty means the compile-time default. host
+// selects how the runtime starts.
 auto initialize(const std::string& assembly_dir,
 				const std::string& dotnet_root_override,
 				const std::string& managed_dir = {},
 				const std::string& dotnet_version = {},
+				const std::string& preferred_dotnet_version = {},
 				runtime_host host = runtime_host::automatic) -> bool;
 void terminate();
 auto managed_assembly_path() -> const std::string&;
 auto dotnet_root() -> const std::string&;
 auto dotnet_version() -> const std::string&;
+auto preferred_dotnet_version() -> const std::string&;
+/// The version of the runtime that was started and the shared framework folder it runs from.
+auto runtime_version() -> const std::string&;
+auto runtime_framework_dir() -> const std::string&;
 /// The host that started the runtime; automatic before the first successful initialize.
 auto active_host() -> runtime_host;
 
