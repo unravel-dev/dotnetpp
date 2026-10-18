@@ -419,7 +419,11 @@ auto init(const compiler_paths& paths, const debugging_config& debugging, const 
 
 	apply_interpreter_config(interpreter);
 
-	if(!bridge_detail::initialize(paths.assembly_dir, paths.config_dir, paths.managed_dir, paths.dotnet_version))
+	if(!bridge_detail::initialize(paths.assembly_dir,
+								  paths.config_dir,
+								  paths.managed_dir,
+								  paths.dotnet_version,
+								  paths.host))
 	{
 		return false;
 	}
@@ -437,6 +441,11 @@ auto get_core_assembly_path() -> std::string
 auto get_dotnet_version() -> const std::string&
 {
 	return bridge_detail::dotnet_version();
+}
+
+auto get_runtime_host() -> runtime_host
+{
+	return bridge_detail::active_host();
 }
 
 void shutdown()

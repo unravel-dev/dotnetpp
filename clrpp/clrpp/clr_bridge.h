@@ -7,7 +7,8 @@
 /*
  * Native side of the Clrpp.Managed bridge.
  *
- * The CoreCLR runtime is hosted through hostfxr. A single managed entry point
+ * The CoreCLR runtime is hosted through hostfxr, or started directly through the
+ * coreclr host API where no hostfxr ships (see runtime_host). A single managed entry point
  * (Clrpp.Bridge.Bootstrap) uploads a table of UnmanagedCallersOnly function
  * pointers which the rest of clrpp calls through.
  */
@@ -179,15 +180,18 @@ struct exports
 // bridge subfolder name probed next to assembly_dir/exe/cwd; empty means the
 // compile-time default (CLRPP_MANAGED_DIR). dotnet_version (major.minor,
 // e.g. "9.0") is used for the fallback runtimeconfig and exposed to tooling;
-// empty means the compile-time default.
+// empty means the compile-time default. host selects how the runtime starts.
 auto initialize(const std::string& assembly_dir,
 				const std::string& dotnet_root_override,
 				const std::string& managed_dir = {},
-				const std::string& dotnet_version = {}) -> bool;
+				const std::string& dotnet_version = {},
+				runtime_host host = runtime_host::automatic) -> bool;
 void terminate();
 auto managed_assembly_path() -> const std::string&;
 auto dotnet_root() -> const std::string&;
 auto dotnet_version() -> const std::string&;
+/// The host that started the runtime; automatic before the first successful initialize.
+auto active_host() -> runtime_host;
 
 } // namespace bridge_detail
 

@@ -78,5 +78,9 @@ using clr::managed_runtime_dir;
 /// Target .NET version (major.minor) configured at init.
 using clr::get_dotnet_version;
 
+/// How the runtime is started (compiler_paths::host), and which host started it.
+using clr::runtime_host;
+using clr::get_runtime_host;
+
 } // namespace dotnet
 #endif

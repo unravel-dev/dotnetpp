@@ -35,4 +35,17 @@ inline auto default_dotnet_version() -> const char*
 	return CLRPP_DOTNET_VERSION;
 }
 
+/// How clr::init starts the runtime.
+enum class runtime_host
+{
+	/// hostfxr when the dotnet root has one, coreclr otherwise.
+	automatic,
+	/// hostfxr resolves the runtime from the bridge's runtimeconfig, the way `dotnet` starts apps.
+	hostfxr,
+	/// The runtime library of the newest shared framework at or above the target version is
+	/// loaded directly and handed the assembly list. The only option where no hostfxr ships,
+	/// such as the Android runtime packs.
+	coreclr
+};
+
 } // namespace clr

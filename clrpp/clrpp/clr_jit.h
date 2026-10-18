@@ -34,6 +34,9 @@ struct compiler_paths
 	/// actual runtime loaded is still governed by the bridge runtimeconfig
 	/// (rollForward LatestMajor picks the newest installed runtime).
 	std::string dotnet_version = default_dotnet_version();
+
+	/// How the runtime is started. config_dir, when set, is the dotnet root for either host.
+	runtime_host host = runtime_host::automatic;
 };
 
 struct debugging_config
@@ -73,6 +76,9 @@ void shutdown();
 
 /// Target .NET version (major.minor, e.g. "9.0") configured at init.
 auto get_dotnet_version() -> const std::string&;
+
+/// The host that started the runtime (hostfxr or coreclr, never automatic) once init succeeded.
+auto get_runtime_host() -> runtime_host;
 
 struct compiler_params
 {
