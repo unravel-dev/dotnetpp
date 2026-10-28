@@ -47,6 +47,8 @@ void throw_if_exception(clr_exception_info_raw& raw);
  * CoreCLR cannot raise a managed exception from inside a native internal
  * call; instead the exception is queued here and (re)thrown by the managed
  * caller right after the internal call returns (see Clrpp.InternalCalls).
+ * As on mono, the first exception of a call is the one thrown: later raises
+ * before the managed caller consumes it are ignored.
  */
 void raise_exception(const std::string& name_space, const std::string& class_name, const std::string& message);
 

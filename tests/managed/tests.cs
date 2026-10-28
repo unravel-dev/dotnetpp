@@ -383,6 +383,26 @@ class MonoppTest
 		}
 	}
 
+	[MethodImpl(MethodImplOptions.InternalCall)]
+	public static extern void ThrowNativeTwice();
+
+	public static bool CatchFirstNativeException()
+	{
+		try
+		{
+			ThrowNativeTwice();
+			return false;
+		}
+		catch (InvalidOperationException e)
+		{
+			return e.Message == "first raise";
+		}
+		catch (Exception)
+		{
+			return false;
+		}
+	}
+
 	// Static internal call verified from the managed side.
 	[MethodImpl(MethodImplOptions.InternalCall)]
 	public static extern int NativeAdd(int a, int b);

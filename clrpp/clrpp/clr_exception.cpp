@@ -59,6 +59,11 @@ thread_local bool pending_exception_set = false;
 
 void raise_exception(const std::string& name_space, const std::string& class_name, const std::string& message)
 {
+	// The first exception of a call wins: on mono it unwinds at once and nothing after it runs.
+	if(pending_exception_set)
+	{
+		return;
+	}
 	pending_exception_payload = name_space + "|" + class_name + "|" + message;
 	pending_exception_set = true;
 }

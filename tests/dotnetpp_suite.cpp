@@ -140,6 +140,13 @@ void MonoppTest_ThrowNative()
 	dotnet::raise_exception("System", "InvalidOperationException", "native says no");
 }
 
+// A guard that raises and then a fallback that raises again: the guard's exception reaches managed code.
+void MonoppTest_ThrowNativeTwice()
+{
+	dotnet::raise_exception("System", "InvalidOperationException", "first raise");
+	dotnet::raise_exception("System", "Exception", "second raise");
+}
+
 auto MonoppTest_NativeAdd(int a, int b) -> int
 {
 	return a + b;
@@ -233,6 +240,7 @@ void test_suite()
 			// Registry helper: same registration through a per-type prefix.
 			dotnet::internal_call_registry registry("Tests.MonoppTest");
 			registry.add_internal_call("ThrowNative", dotnet_internal_call(MonoppTest_ThrowNative));
+			registry.add_internal_call("ThrowNativeTwice", dotnet_internal_call(MonoppTest_ThrowNativeTwice));
 			registry.add_internal_call("NativeAdd", dotnet_internal_call(MonoppTest_NativeAdd));
 			registry.add_internal_call("NativeTypeName", dotnet_internal_call(MonoppTest_NativeTypeName));
 
@@ -871,6 +879,18 @@ void test_suite()
 			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
 			auto type = assembly.get_type("Tests", "MonoppTest");
 			auto method_thunk = dotnet::make_method_invoker<bool()>(type, "CatchNativeException");
+			EXPECT(method_thunk() == true);
+		};
+		EXPECT_NOTHROWS(expression());
+	};
+
+	TEST_CASE("dotnetpp : first native exception of a call wins")
+	{
+		auto expression = [&]()
+		{
+			auto assembly = domain.get_assembly(DATA_DIR "dotnetpp_tests_managed.dll");
+			auto type = assembly.get_type("Tests", "MonoppTest");
+			auto method_thunk = dotnet::make_method_invoker<bool()>(type, "CatchFirstNativeException");
 			EXPECT(method_thunk() == true);
 		};
 		EXPECT_NOTHROWS(expression());
