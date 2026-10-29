@@ -2176,6 +2176,52 @@ void test_suite()
 		};
 		EXPECT_NOTHROWS(expression());
 	};
+
+	TEST_CASE("dotnetpp : domain using System.Text.Json unloads")
+	{
+		// The bridge logs its verdict for every unloaded domain; a framework
+		// cache still holding a type of the domain turns it into a leak report.
+		const std::string domain_name = "dotnetpp_json_unload";
+		const auto default_handler = dotnet::get_log_handler("default");
+		const auto trace_handler = dotnet::get_log_handler("trace");
+		const auto error_handler = dotnet::get_log_handler("error");
+		bool unloaded_cleanly = false;
+		bool leaked = false;
+		auto capture = [&](const std::string& message)
+		{
+			if(message.find("domain '" + domain_name + "' unloaded cleanly") != std::string::npos)
+			{
+				unloaded_cleanly = true;
+			}
+			if(message.find("domain '" + domain_name + "' LEAKED") != std::string::npos)
+			{
+				leaked = true;
+			}
+			if(default_handler)
+			{
+				default_handler(message);
+			}
+		};
+		dotnet::set_log_handler("trace", capture);
+		dotnet::set_log_handler("error", capture);
+		auto expression = [&]()
+		{
+			dotnet::compiler_params params;
+			params.files = {DATA_DIR "managed/json_unload.cs"};
+			params.output_name = DATA_DIR "dotnetpp_tests_json_unload.dll";
+			EXPECT(dotnet::compile(params) == true);
+			dotnet::domain child(domain_name);
+			auto assembly = child.get_assembly(DATA_DIR "dotnetpp_tests_json_unload.dll");
+			auto round_trip =
+				dotnet::make_method_invoker<bool()>(assembly.get_type("Tests", "JsonSaver"), "RoundTrip");
+			EXPECT(round_trip() == true);
+		};
+		EXPECT_NOTHROWS(expression());
+		dotnet::set_log_handler("trace", trace_handler);
+		dotnet::set_log_handler("error", error_handler);
+		EXPECT(unloaded_cleanly);
+		EXPECT(!leaked);
+	};
 #endif
 }
 

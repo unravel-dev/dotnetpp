@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
@@ -25,9 +26,11 @@ public static partial class Bridge
     //   1. runs [AutoStaticsCleanup] over every clrpp context: types marked
     //      with the attribute either get `static OnStaticsCleanup()` invoked
     //      (when defined) or all their non-readonly static fields reset,
-    //   2. purges interned reflection handles owned by the dying context,
-    //   3. unloads and *verifies* collection through a WeakReference,
-    //   4. when the context survives, scans the static fields of the live
+    //   2. clears the framework caches built over reflection (System.Text.Json
+    //      and the like), which would keep every type passed to them alive,
+    //   3. purges interned reflection handles owned by the dying context,
+    //   4. unloads and *verifies* collection through a WeakReference,
+    //   5. when the context survives, scans the static fields of the live
     //      contexts for roots into the dead one and reports every finding.
     //
     // The verification itself is cheap (a WeakReference probe after GC); the
@@ -36,6 +39,7 @@ public static partial class Bridge
 
     private const string CleanupAttributeName = "AutoStaticsCleanupAttribute";
     private const string CleanupMethodName = "OnStaticsCleanup";
+    private const string ClearCacheMethodName = "ClearCache";
 
     /// <returns>0 = unloaded cleanly, 1 = context leaked, -1 = error.</returns>
     [UnmanagedCallersOnly]
@@ -93,6 +97,9 @@ public static partial class Bridge
         identity = LeakAnalysis.ContextIdentity.Capture(alc);
 
         RunStaticsCleanup();
+        // After the statics cleanup: OnStaticsCleanup is script code and may
+        // still go through the cached framework paths.
+        ClearFrameworkCaches();
         PurgeInternedHandles(alc);
         ArrayPinCache.ReleaseAll();
 
@@ -187,6 +194,71 @@ public static partial class Bridge
             }
 
             field.SetValue(null, field.FieldType.IsValueType ? Activator.CreateInstance(field.FieldType) : null);
+        }
+    }
+
+    // -- framework caches -----------------------------------------------------
+
+    // Framework libraries keep metadata built over reflection in statics of
+    // the default context, which never unloads (System.Text.Json type infos
+    // and member accessors, TypeDescriptor caches). A script type that went
+    // through them stays reachable from there, and with it its whole context.
+    // These libraries reset such caches for hot reload through
+    // [assembly: MetadataUpdateHandler(typeof(X))] and a static
+    // `ClearCache(Type[] types)`, where null means everything; an unload drops
+    // types just like an edit does, so every such handler runs here.
+    //
+    // CoreLib's handler is skipped: it only resets the reflection data each
+    // type keeps about its own members, which goes away with the type, yet it
+    // walks every loaded type of every context, and on .NET 10 it also makes
+    // reflection check each member it caches for a hot-reload deletion
+    // attribute for the rest of the process.
+    private static void ClearFrameworkCaches()
+    {
+        foreach (var assembly in AssemblyLoadContext.Default.Assemblies)
+        {
+            if (assembly == typeof(object).Assembly)
+            {
+                continue;
+            }
+
+            foreach (var handlerType in GetMetadataUpdateHandlers(assembly))
+            {
+                InvokeClearCache(handlerType);
+            }
+        }
+    }
+
+    private static Type[] GetMetadataUpdateHandlers(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetCustomAttributes<MetadataUpdateHandlerAttribute>()
+                           .Select(attribute => attribute.HandlerType)
+                           .ToArray();
+        }
+        catch (Exception ex)
+        {
+            Log($"[MetadataUpdateHandler] cannot read the handlers of {assembly.GetName().Name}: {ex.Message}",
+                "warning");
+            return Type.EmptyTypes;
+        }
+    }
+
+    private static void InvokeClearCache(Type handlerType)
+    {
+        try
+        {
+            var clearCache = handlerType.GetMethod(ClearCacheMethodName,
+                                                   BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                                                   binder: null, new[] { typeof(Type[]) }, modifiers: null);
+            clearCache?.Invoke(null, BindingFlags.DoNotWrapExceptions, binder: null, new object[] { null },
+                               culture: null);
+        }
+        catch (Exception ex)
+        {
+            Log($"[MetadataUpdateHandler] {handlerType.FullName}.{ClearCacheMethodName} failed: {ex.Message}",
+                "warning");
         }
     }
 
